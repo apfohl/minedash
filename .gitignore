@@ -1,0 +1,6 @@
+# binary
+minedash
+
+# local config
+.env
+compose.yml

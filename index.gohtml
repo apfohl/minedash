@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MineDash</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg:          #0e1a0e;
+      --bg-card:     #162416;
+      --bg-input:    #1c2e1c;
+      --border:      #2a4a2a;
+      --border-bright: #3d6e3d;
+      --green-dim:   #4a7a3a;
+      --green:       #5fa83f;
+      --green-bright:#8bc34a;
+      --green-light: #b5e27a;
+      --text:        #d4edba;
+      --text-muted:  #7aaa5a;
+      --red:         #c0392b;
+      --red-dim:     #7a2520;
+      --orange:      #d4801a;
+      --radius:      6px;
+      --font:        'JetBrains Mono', monospace;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 14px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    /* ── header ── */
+    header {
+      width: 100%;
+      max-width: 600px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 32px;
+    }
+    .logo {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--green-bright);
+      letter-spacing: 0.05em;
+    }
+    .logo span { color: var(--green-light); }
+
+    /* ── card ── */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px 32px;
+      width: 100%;
+      max-width: 600px;
+    }
+    .card + .card { margin-top: 16px; }
+    .card-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--text-muted);
+      margin-bottom: 20px;
+    }
+
+    /* ── login form ── */
+    #login-view { text-align: center; }
+    #login-view .logo { font-size: 26px; margin-bottom: 28px; display: block; }
+    .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; text-align: left; }
+    .field label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; }
+    .field input {
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 14px;
+      padding: 10px 14px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .field input:focus { border-color: var(--green); }
+
+    /* ── buttons ── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-family: var(--font);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 10px 20px;
+      border: 1px solid transparent;
+      border-radius: var(--radius);
+      cursor: pointer;
+      transition: opacity 0.15s, background 0.15s, border-color 0.15s;
+      text-decoration: none;
+    }
+    .btn:disabled { opacity: 0.38; cursor: not-allowed; }
+    .btn-primary {
+      background: var(--green);
+      border-color: var(--green-bright);
+      color: #0e1a0e;
+      width: 100%;
+    }
+    .btn-primary:hover:not(:disabled) { background: var(--green-bright); }
+    .btn-ghost {
+      background: transparent;
+      border-color: var(--border-bright);
+      color: var(--text);
+    }
+    .btn-ghost:hover:not(:disabled) { border-color: var(--green); color: var(--green-bright); }
+    .btn-danger {
+      background: transparent;
+      border-color: var(--red-dim);
+      color: #e07060;
+    }
+    .btn-danger:hover:not(:disabled) { border-color: var(--red); color: #ff8070; }
+    .btn-sm { padding: 7px 14px; font-size: 12px; }
+
+    /* ── status badge ── */
+    .status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 6px 14px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+    }
+    .badge::before {
+      content: '';
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    .badge-running  { color: var(--green-bright); border-color: var(--green-dim); background: rgba(95,168,63,0.1); }
+    .badge-stopped  { color: #a0a0a0;             border-color: #3a3a3a;         background: rgba(80,80,80,0.1);  }
+    .badge-starting { color: var(--orange);        border-color: #7a4a10;         background: rgba(212,128,26,0.1);}
+    .badge-stopping { color: var(--orange);        border-color: #7a4a10;         background: rgba(212,128,26,0.1);}
+    .badge-unknown  { color: #a0a0a0;             border-color: #3a3a3a;         background: rgba(80,80,80,0.1);  }
+
+    /* ── controls ── */
+    .btn-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 20px;
+    }
+    .btn-row .btn { flex: 1; min-width: 120px; }
+
+    /* ── world section ── */
+    .world-row {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+    .world-row .btn { flex: 1; min-width: 160px; }
+
+    .upload-area {
+      margin-top: 16px;
+      border: 1px dashed var(--border-bright);
+      border-radius: var(--radius);
+      padding: 20px;
+      text-align: center;
+      transition: border-color 0.15s, background 0.15s;
+      cursor: pointer;
+      position: relative;
+    }
+    .upload-area.drag-over {
+      border-color: var(--green);
+      background: rgba(95,168,63,0.06);
+    }
+    .upload-area input[type=file] {
+      position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+    }
+    .upload-area p { color: var(--text-muted); font-size: 13px; pointer-events: none; }
+    .upload-area .filename { color: var(--green-bright); margin-top: 6px; font-size: 13px; }
+
+    .upload-submit { margin-top: 12px; width: 100%; }
+
+    /* ── feedback / error ── */
+    .feedback {
+      margin-top: 12px;
+      padding: 10px 14px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      display: none;
+    }
+    .feedback.show { display: block; }
+    .feedback.ok  { background: rgba(95,168,63,0.12); border: 1px solid var(--green-dim); color: var(--green-light); }
+    .feedback.err { background: rgba(192,57,43,0.12); border: 1px solid var(--red-dim);   color: #f08070; }
+
+    /* ── logout link ── */
+    .logout-btn {
+      background: none; border: none; cursor: pointer;
+      font-family: var(--font); font-size: 12px;
+      color: var(--text-muted);
+      text-decoration: underline;
+    }
+    .logout-btn:hover { color: var(--text); }
+
+    /* ── error message under login ── */
+    #login-error {
+      color: #f08070;
+      font-size: 13px;
+      margin-top: 10px;
+      min-height: 18px;
+    }
+
+    /* ── hint text ── */
+    .hint { font-size: 12px; color: var(--text-muted); margin-top: 8px; }
+  </style>
+</head>
+<body>
+
+<!-- ════════════════ LOGIN VIEW ════════════════ -->
+<div id="login-view">
+  <span class="logo">Mine<span>Dash</span></span>
+  <div class="card">
+    <div class="field">
+      <label for="password">Password</label>
+      <input type="password" id="password" placeholder="Enter password" autocomplete="current-password" />
+    </div>
+    <button class="btn btn-primary" id="login-btn" onclick="doLogin()">Login</button>
+    <div id="login-error"></div>
+  </div>
+</div>
+
+<!-- ════════════════ DASHBOARD VIEW ════════════════ -->
+<div id="dashboard-view" style="display:none; width:100%; max-width:600px;">
+  <header>
+    <span class="logo">Mine<span>Dash</span></span>
+    <button class="logout-btn" onclick="doLogout()">logout</button>
+  </header>
+
+  <!-- Status card -->
+  <div class="card">
+    <div class="card-title">Server Status</div>
+    <div class="status-row">
+      <span id="status-badge" class="badge badge-unknown">unknown</span>
+      <button class="btn btn-ghost btn-sm" onclick="refreshStatus()">Refresh</button>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-ghost" id="btn-start"   onclick="doAction('start')">Start</button>
+      <button class="btn btn-ghost" id="btn-restart" onclick="doAction('restart')">Restart</button>
+      <button class="btn btn-danger" id="btn-stop"   onclick="doAction('stop')">Stop</button>
+    </div>
+    <div id="action-feedback" class="feedback"></div>
+  </div>
+
+  <!-- World card -->
+  <div class="card">
+    <div class="card-title">World Management</div>
+    <div class="world-row">
+      <button class="btn btn-ghost" id="btn-download" onclick="doDownload()">Download World</button>
+    </div>
+    <p class="hint" id="world-hint"></p>
+
+    <!-- Upload -->
+    <div style="margin-top: 20px;">
+      <div class="card-title">Upload World</div>
+      <div class="upload-area" id="upload-area">
+        <input type="file" id="world-file" accept=".zip" onchange="onFileSelect(this)" />
+        <p>Drop a world ZIP here or click to select</p>
+        <div class="filename" id="selected-filename"></div>
+      </div>
+      <button class="btn btn-primary upload-submit" id="btn-upload" onclick="doUpload()" disabled>Upload &amp; Replace World</button>
+      <div id="upload-feedback" class="feedback"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ── state ──────────────────────────────────────────────
+  let currentStatus = 'unknown';
+
+  // ── init ───────────────────────────────────────────────
+  window.addEventListener('DOMContentLoaded', () => {
+    // Try fetching status — if it succeeds we are already authenticated.
+    fetch('/api/status')
+      .then(r => {
+        if (r.ok) return r.json();
+        throw new Error('unauthenticated');
+      })
+      .then(data => {
+        showDashboard();
+        applyStatus(data.status);
+      })
+      .catch(() => {
+        showLogin();
+      });
+
+    // Drag-and-drop styling
+    const area = document.getElementById('upload-area');
+    area.addEventListener('dragover',  e => { e.preventDefault(); area.classList.add('drag-over'); });
+    area.addEventListener('dragleave', () => area.classList.remove('drag-over'));
+    area.addEventListener('drop', e => {
+      e.preventDefault();
+      area.classList.remove('drag-over');
+      const files = e.dataTransfer.files;
+      if (files.length > 0) {
+        document.getElementById('world-file').files = files;
+        onFileSelect(document.getElementById('world-file'));
+      }
+    });
+
+    // Login on Enter key
+    document.getElementById('password').addEventListener('keydown', e => {
+      if (e.key === 'Enter') doLogin();
+    });
+  });
+
+  // ── views ──────────────────────────────────────────────
+  function showLogin() {
+    document.getElementById('login-view').style.display = '';
+    document.getElementById('dashboard-view').style.display = 'none';
+  }
+  function showDashboard() {
+    document.getElementById('login-view').style.display = 'none';
+    document.getElementById('dashboard-view').style.display = '';
+  }
+
+  // ── login ──────────────────────────────────────────────
+  async function doLogin() {
+    const pw = document.getElementById('password').value;
+    const errEl = document.getElementById('login-error');
+    errEl.textContent = '';
+    if (!pw) { errEl.textContent = 'Password is required.'; return; }
+
+    const btn = document.getElementById('login-btn');
+    btn.disabled = true;
+    btn.textContent = 'Logging in…';
+
+    try {
+      const r = await fetch('/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pw }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        errEl.textContent = d.error || 'Login failed.';
+        return;
+      }
+      document.getElementById('password').value = '';
+      showDashboard();
+      refreshStatus();
+    } catch {
+      errEl.textContent = 'Network error. Please try again.';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Login';
+    }
+  }
+
+  // ── logout ─────────────────────────────────────────────
+  async function doLogout() {
+    await fetch('/logout', { method: 'POST' }).catch(() => {});
+    showLogin();
+  }
+
+  // ── status ─────────────────────────────────────────────
+  async function refreshStatus() {
+    try {
+      const r = await fetch('/api/status');
+      if (r.status === 401) { showLogin(); return; }
+      const d = await r.json();
+      applyStatus(d.status);
+    } catch {
+      applyStatus('unknown');
+    }
+  }
+
+  function applyStatus(s) {
+    currentStatus = s;
+    const badge = document.getElementById('status-badge');
+    badge.className = 'badge badge-' + s;
+    badge.textContent = s;
+
+    const running  = s === 'running';
+    const stopped  = s === 'stopped';
+    const busy     = s === 'starting' || s === 'stopping';
+
+    document.getElementById('btn-start').disabled   = running || busy;
+    document.getElementById('btn-stop').disabled    = stopped || busy;
+    document.getElementById('btn-restart').disabled = stopped || busy;
+    document.getElementById('btn-download').disabled = running || busy;
+    document.getElementById('btn-upload').disabled  = running || busy || !hasFile();
+
+    const hint = document.getElementById('world-hint');
+    if (running) {
+      hint.textContent = 'Stop the server before downloading or uploading a world.';
+    } else {
+      hint.textContent = '';
+    }
+  }
+
+  // ── server actions ─────────────────────────────────────
+  async function doAction(action) {
+    const fb = document.getElementById('action-feedback');
+    setFeedback(fb, '', '');
+
+    // Disable all action buttons during the request
+    ['btn-start','btn-stop','btn-restart'].forEach(id =>
+      document.getElementById(id).disabled = true);
+
+    try {
+      const r = await fetch('/api/' + action, { method: 'POST' });
+      if (r.status === 401) { showLogin(); return; }
+      const d = await r.json();
+      if (!r.ok) {
+        setFeedback(fb, 'err', d.error || 'Action failed.');
+      } else {
+        setFeedback(fb, 'ok', capitalize(action) + ' successful.');
+        await refreshStatus();
+      }
+    } catch {
+      setFeedback(fb, 'err', 'Network error. Please try again.');
+    } finally {
+      await refreshStatus();
+    }
+  }
+
+  // ── world download ─────────────────────────────────────
+  function doDownload() {
+    window.location.href = '/api/world/download';
+  }
+
+  // ── world upload ───────────────────────────────────────
+  function onFileSelect(input) {
+    const el = document.getElementById('selected-filename');
+    if (input.files && input.files[0]) {
+      el.textContent = input.files[0].name;
+      document.getElementById('btn-upload').disabled =
+        currentStatus === 'running' || currentStatus === 'starting' || currentStatus === 'stopping';
+    } else {
+      el.textContent = '';
+      document.getElementById('btn-upload').disabled = true;
+    }
+  }
+
+  function hasFile() {
+    const f = document.getElementById('world-file');
+    return f && f.files && f.files.length > 0;
+  }
+
+  async function doUpload() {
+    const fb = document.getElementById('upload-feedback');
+    setFeedback(fb, '', '');
+
+    const fileInput = document.getElementById('world-file');
+    if (!fileInput.files || fileInput.files.length === 0) {
+      setFeedback(fb, 'err', 'No file selected.');
+      return;
+    }
+
+    const btn = document.getElementById('btn-upload');
+    btn.disabled = true;
+    btn.textContent = 'Uploading…';
+
+    const form = new FormData();
+    form.append('world', fileInput.files[0]);
+
+    try {
+      const r = await fetch('/api/world/upload', { method: 'POST', body: form });
+      if (r.status === 401) { showLogin(); return; }
+      const d = await r.json();
+      if (!r.ok) {
+        setFeedback(fb, 'err', d.error || 'Upload failed.');
+      } else {
+        setFeedback(fb, 'ok', 'World uploaded and replaced successfully.');
+        fileInput.value = '';
+        document.getElementById('selected-filename').textContent = '';
+      }
+    } catch {
+      setFeedback(fb, 'err', 'Network error. Please try again.');
+    } finally {
+      btn.textContent = 'Upload & Replace World';
+      await refreshStatus();
+    }
+  }
+
+  // ── helpers ────────────────────────────────────────────
+  function setFeedback(el, type, msg) {
+    el.className = 'feedback' + (type ? ' show ' + type : '');
+    el.textContent = msg;
+  }
+  function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+</script>
+</body>
+</html>
