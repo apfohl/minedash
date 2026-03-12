@@ -42,11 +42,15 @@ needed:
 # interactive (input is hidden)
 ./minedash genpw
 
-# or directly from the Docker image before the stack is up
-docker run --rm -it codeberg.org/apfohl/minedash ./minedash genpw
+# or without building first
+go run . genpw
 ```
 
 Copy the printed `$2a$12$…` hash for the next step.
+
+> **Note:** bcrypt hashes contain `$` signs. In `.env` files and Docker Compose
+> `environment:` blocks, each `$` must be escaped as `$$` to prevent variable
+> interpolation — e.g. `$$2a$$12$$…`.
 
 ### 2. Create your `.env`
 
@@ -57,11 +61,14 @@ cp .env.example .env
 Edit `.env`:
 
 ```dotenv
-MC_CONTAINER_NAME=minecraft
-AUTH_PASSWORD_HASH=$2a$12$...   # hash from step 1
-JWT_SECRET=                     # openssl rand -hex 32
-PORT=8080
+MC_STACK_NAME=${COMPOSE_PROJECT_NAME}  # set automatically by Compose
+MC_SERVICE_NAME=minecraft              # Compose service name of the MC container
+AUTH_PASSWORD_HASH=$$2a$$12$$...       # hash from step 1 — escape each $ as $$
+JWT_SECRET=                            # openssl rand -hex 32
 ```
+
+> If you run MineDash outside Docker Compose, use `MC_CONTAINER_NAME=<name>` instead of
+> `MC_STACK_NAME`/`MC_SERVICE_NAME`.
 
 ### 3. Create your `compose.yml`
 
@@ -88,11 +95,30 @@ environment always take precedence.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `AUTH_PASSWORD_HASH` | yes | — | bcrypt hash (cost 12) of the login password |
-| `JWT_SECRET` | yes | — | HMAC key for signing session tokens (`openssl rand -hex 32`) |
-| `MC_CONTAINER_NAME` | no | `minecraft` | Name of the Minecraft Docker container |
+| `AUTH_PASSWORD_HASH` | yes | — | bcrypt hash (cost 12) of the login password; generate with `./minedash genpw` |
+| `JWT_SECRET` | yes | — | HMAC key for signing session tokens; generate with `openssl rand -hex 32` |
+| `MC_STACK_NAME` | yes* | — | Docker Compose project name; set to `${COMPOSE_PROJECT_NAME}` in compose.yml |
+| `MC_SERVICE_NAME` | no | `minecraft` | Compose service name of the Minecraft container |
+| `MC_CONTAINER_NAME` | no | — | Direct container name/ID override — bypasses label lookup; use outside Docker Compose |
+| `MC_UID` | no | `1000` | UID to assign to the world folder after upload; must match `PUID` in the itzg container |
+| `MC_GID` | no | `1000` | GID to assign to the world folder after upload; must match `PGID` in the itzg container |
 | `PORT` | no | `8080` | Internal HTTP listen port |
 | `WORLD_PATH` | no | auto-detect | Explicit path to the world folder; skips scanning `/mc-data` for `level.dat` |
+
+\* Required unless `MC_CONTAINER_NAME` is set.
+
+### Container resolution
+
+MineDash locates the Minecraft container using the following priority order:
+
+1. **`MC_CONTAINER_NAME`** — used directly as the container name/ID; all label-based
+   lookup is skipped.
+2. **`MC_STACK_NAME` + `MC_SERVICE_NAME`** — the container is found by its Docker
+   Compose labels (`com.docker.compose.project` / `com.docker.compose.service`).
+
+When running inside Docker Compose, set `MC_STACK_NAME=${COMPOSE_PROJECT_NAME}` and
+Compose fills in the project name automatically. Use `MC_CONTAINER_NAME` only when
+running MineDash outside a Compose stack.
 
 ## Docker Compose layout
 

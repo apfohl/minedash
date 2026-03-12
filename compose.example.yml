@@ -24,7 +24,7 @@ services:
     environment:
       - MC_STACK_NAME=${COMPOSE_PROJECT_NAME}  # auto-filled by Compose at deploy time
       - MC_SERVICE_NAME=minecraft              # Compose service name of the MC container
-      - AUTH_PASSWORD_HASH=        # bcrypt hash: ./minedash genpw
+      - AUTH_PASSWORD_HASH=        # bcrypt hash: ./minedash genpw — escape each $ as $$
       - JWT_SECRET=                # openssl rand -hex 32
       - PORT=8080
       - MC_UID=1000                # must match PUID of the minecraft container
