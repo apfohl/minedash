@@ -89,7 +89,7 @@ func (d *dockerService) close() {
 }
 
 // status returns one of: "running", "starting", "stopping", "stopped", "unhealthy", "unknown".
-// When the container has a healthcheck (itzg/docker-minecraft-server ships one by default),
+// When the container has a healthcheck (itzg/minecraft-server ships one by default),
 // the health state is used to distinguish a fully running server from one still booting.
 func (d *dockerService) status(ctx context.Context) (string, error) {
 	info, err := d.client.ContainerInspect(ctx, d.containerName)

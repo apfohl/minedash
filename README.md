@@ -1,7 +1,7 @@
 # MineDash
 
 A self-hosted Minecraft server management sidecar. MineDash runs as a Docker
-container alongside your `itzg/docker-minecraft-server` instance and gives you
+container alongside your `itzg/minecraft-server` instance and gives you
 a clean web interface to start, stop, and restart the server, and to safely
 download and upload the world as a ZIP file.
 
@@ -27,7 +27,7 @@ download and upload the world as a ZIP file.
 ## Requirements
 
 - Docker with the Docker socket accessible (`/var/run/docker.sock`)
-- A running `itzg/docker-minecraft-server` container sharing a named volume
+- A running `itzg/minecraft-server` container sharing a named volume
   with MineDash
 - A reverse proxy (e.g. Traefik) — or expose port `8080` directly
 
