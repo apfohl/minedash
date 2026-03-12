@@ -157,18 +157,20 @@
       background: currentColor;
       flex-shrink: 0;
     }
-    .badge-running  { color: var(--green-bright); border-color: var(--green-dim); background: rgba(95,168,63,0.1); }
-    .badge-stopped  { color: #a0a0a0;             border-color: #3a3a3a;         background: rgba(80,80,80,0.1);  }
-    .badge-starting { color: var(--orange);        border-color: #7a4a10;         background: rgba(212,128,26,0.1);}
-    .badge-stopping { color: var(--orange);        border-color: #7a4a10;         background: rgba(212,128,26,0.1);}
-    .badge-unknown  { color: #a0a0a0;             border-color: #3a3a3a;         background: rgba(80,80,80,0.1);  }
+    .badge-running   { color: var(--green-bright); border-color: var(--green-dim); background: rgba(95,168,63,0.1);   }
+    .badge-stopped   { color: #a0a0a0;             border-color: #3a3a3a;         background: rgba(80,80,80,0.1);    }
+    .badge-starting  { color: var(--orange);        border-color: #7a4a10;         background: rgba(212,128,26,0.1);  }
+    .badge-stopping  { color: var(--orange);        border-color: #7a4a10;         background: rgba(212,128,26,0.1);  }
+    .badge-unhealthy { color: var(--red);           border-color: var(--red-dim);  background: rgba(192,57,43,0.1);   }
+    .badge-unknown   { color: #a0a0a0;              border-color: #3a3a3a;         background: rgba(80,80,80,0.1);    }
 
     @keyframes pulse {
       0%, 100% { opacity: 1; }
       50%       { opacity: 0.3; }
     }
     .badge-starting::before,
-    .badge-stopping::before { animation: pulse 1.2s ease-in-out infinite; }
+    .badge-stopping::before,
+    .badge-unhealthy::before { animation: pulse 1.2s ease-in-out infinite; }
 
     /* ── controls ── */
     .btn-row {
@@ -426,22 +428,19 @@
     badge.className = 'badge badge-' + s;
     badge.textContent = s;
 
-    const running  = s === 'running';
-    const stopped  = s === 'stopped';
-    const busy     = s === 'starting' || s === 'stopping';
+    const canStart   = s === 'stopped';
+    const canStop    = s === 'running' || s === 'starting' || s === 'unhealthy';
+    const canRestart = s === 'running' || s === 'unhealthy';
+    const canWorld   = s === 'stopped';
 
-    document.getElementById('btn-start').disabled   = running || busy;
-    document.getElementById('btn-stop').disabled    = stopped || busy;
-    document.getElementById('btn-restart').disabled = stopped || busy;
-    document.getElementById('btn-download').disabled = running || busy;
-    document.getElementById('btn-upload').disabled  = running || busy || !hasFile();
+    document.getElementById('btn-start').disabled    = !canStart;
+    document.getElementById('btn-stop').disabled     = !canStop;
+    document.getElementById('btn-restart').disabled  = !canRestart;
+    document.getElementById('btn-download').disabled = !canWorld;
+    document.getElementById('btn-upload').disabled   = !canWorld || !hasFile();
 
     const hint = document.getElementById('world-hint');
-    if (running) {
-      hint.textContent = 'Stop the server before downloading or uploading a world.';
-    } else {
-      hint.textContent = '';
-    }
+    hint.textContent = canWorld ? '' : 'Stop the server before downloading or uploading a world.';
   }
 
   // ── server actions ─────────────────────────────────────

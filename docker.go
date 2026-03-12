@@ -28,7 +28,9 @@ func (d *dockerService) close() {
 	_ = d.client.Close()
 }
 
-// status returns one of: "running", "stopped", "starting", "stopping", "unknown".
+// status returns one of: "running", "starting", "stopping", "stopped", "unhealthy", "unknown".
+// When the container has a healthcheck (itzg/docker-minecraft-server ships one by default),
+// the health state is used to distinguish a fully running server from one still booting.
 func (d *dockerService) status(ctx context.Context) (string, error) {
 	info, err := d.client.ContainerInspect(ctx, d.containerName)
 	if err != nil {
@@ -39,16 +41,29 @@ func (d *dockerService) status(ctx context.Context) (string, error) {
 	}
 
 	switch info.State.Status {
-	case "running":
-		return "running", nil
-	case "exited", "dead", "created":
+	case container.StateExited, container.StateDead, container.StateCreated, container.StatePaused:
 		return "stopped", nil
-	case "restarting":
+	case container.StateRestarting:
 		return "starting", nil
-	case "paused":
-		return "stopped", nil
+	case container.StateRemoving:
+		return "stopping", nil
+	case container.StateRunning:
+		// No healthcheck configured — trust Docker's running state directly.
+		if info.State.Health == nil {
+			return "running", nil
+		}
+		switch info.State.Health.Status {
+		case container.Starting:
+			return "starting", nil
+		case container.Healthy:
+			return "running", nil
+		case container.Unhealthy:
+			return "unhealthy", nil
+		default: // "none" or any future value
+			return "running", nil
+		}
 	default:
-		return info.State.Status, nil
+		return "unknown", nil
 	}
 }
 
