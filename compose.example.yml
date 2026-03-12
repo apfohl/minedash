@@ -8,7 +8,6 @@ services:
   minecraft:
     <<: *logging
     image: itzg/docker-minecraft-server
-    container_name: minecraft
     environment:
       EULA: "TRUE"
     volumes:
@@ -23,12 +22,15 @@ services:
       - mc-data:/mc-data
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      - MC_CONTAINER_NAME=minecraft
-      - AUTH_PASSWORD_HASH=       # bcrypt hash: htpasswd -bnBC 12 "" pw | tr -d ':\n'
-      - JWT_SECRET=               # openssl rand -hex 32
+      # Stack name is auto-detected from this container's own Compose labels.
+      # Override only if auto-detection fails (e.g. running outside Compose).
+      # MC_STACK_NAME=mystack
+      - MC_SERVICE_NAME=minecraft  # Compose service name of the MC container
+      - AUTH_PASSWORD_HASH=        # bcrypt hash: ./minedash genpw
+      - JWT_SECRET=                # openssl rand -hex 32
       - PORT=8080
-      - MC_UID=1000               # must match PUID of the minecraft container
-      - MC_GID=1000               # must match PGID of the minecraft container
+      - MC_UID=1000                # must match PUID of the minecraft container
+      - MC_GID=1000                # must match PGID of the minecraft container
     networks:
       - gateway
     labels:

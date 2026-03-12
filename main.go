@@ -25,7 +25,11 @@ var templates embed.FS
 
 // Config holds all application configuration loaded from environment variables.
 type Config struct {
-	MCContainerName  string
+	// Container resolution — see docker.go for priority order.
+	MCContainerName string // explicit override; skips all label-based lookup when set
+	MCStackName     string // Compose stack name; auto-derived from own labels when empty
+	MCServiceName   string // Compose service name of the MC container (default "minecraft")
+
 	AuthPasswordHash string
 	JWTSecret        string
 	Port             string
@@ -38,7 +42,9 @@ func loadConfig() Config {
 	_ = godotenv.Load()
 
 	return Config{
-		MCContainerName:  getEnv("MC_CONTAINER_NAME", "minecraft"),
+		MCContainerName:  getEnv("MC_CONTAINER_NAME", ""),
+		MCStackName:      getEnv("MC_STACK_NAME", ""),
+		MCServiceName:    getEnv("MC_SERVICE_NAME", "minecraft"),
 		AuthPasswordHash: getEnv("AUTH_PASSWORD_HASH", ""),
 		JWTSecret:        getEnv("JWT_SECRET", ""),
 		Port:             getEnv("PORT", "8080"),
@@ -104,7 +110,7 @@ func main() {
 		log.Fatal("JWT_SECRET is required")
 	}
 
-	dockerSvc, err := newDockerService(cfg.MCContainerName)
+	dockerSvc, err := newDockerService(cfg)
 	if err != nil {
 		log.Fatalf("failed to connect to Docker: %v", err)
 	}
