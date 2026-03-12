@@ -138,7 +138,6 @@
     .status-row {
       display: flex;
       align-items: center;
-      justify-content: space-between;
       gap: 12px;
     }
     .badge {
@@ -156,12 +155,20 @@
       width: 8px; height: 8px;
       border-radius: 50%;
       background: currentColor;
+      flex-shrink: 0;
     }
     .badge-running  { color: var(--green-bright); border-color: var(--green-dim); background: rgba(95,168,63,0.1); }
     .badge-stopped  { color: #a0a0a0;             border-color: #3a3a3a;         background: rgba(80,80,80,0.1);  }
     .badge-starting { color: var(--orange);        border-color: #7a4a10;         background: rgba(212,128,26,0.1);}
     .badge-stopping { color: var(--orange);        border-color: #7a4a10;         background: rgba(212,128,26,0.1);}
     .badge-unknown  { color: #a0a0a0;             border-color: #3a3a3a;         background: rgba(80,80,80,0.1);  }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+    .badge-starting::before,
+    .badge-stopping::before { animation: pulse 1.2s ease-in-out infinite; }
 
     /* ── controls ── */
     .btn-row {
@@ -263,7 +270,6 @@
     <div class="card-title">Server Status</div>
     <div class="status-row">
       <span id="status-badge" class="badge badge-unknown">unknown</span>
-      <button class="btn btn-ghost btn-sm" onclick="refreshStatus()">Refresh</button>
     </div>
     <div class="btn-row">
       <button class="btn btn-ghost" id="btn-start"   onclick="doAction('start')">Start</button>
@@ -298,6 +304,8 @@
 <script>
   // ── state ──────────────────────────────────────────────
   let currentStatus = 'unknown';
+  let polling       = false;   // true while an action/upload is in flight
+  let pollInterval  = null;
 
   // ── init ───────────────────────────────────────────────
   window.addEventListener('DOMContentLoaded', () => {
@@ -335,14 +343,30 @@
     });
   });
 
+  // ── polling ────────────────────────────────────────────
+  function startPolling() {
+    if (pollInterval) return;
+    pollInterval = setInterval(() => {
+      if (polling) return;
+      refreshStatus();
+    }, 3000);
+  }
+
+  function stopPolling() {
+    clearInterval(pollInterval);
+    pollInterval = null;
+  }
+
   // ── views ──────────────────────────────────────────────
   function showLogin() {
+    stopPolling();
     document.getElementById('login-view').style.display = '';
     document.getElementById('dashboard-view').style.display = 'none';
   }
   function showDashboard() {
     document.getElementById('login-view').style.display = 'none';
     document.getElementById('dashboard-view').style.display = '';
+    startPolling();
   }
 
   // ── login ──────────────────────────────────────────────
@@ -424,6 +448,7 @@
   async function doAction(action) {
     const fb = document.getElementById('action-feedback');
     setFeedback(fb, '', '');
+    polling = true;
 
     // Disable all action buttons during the request
     ['btn-start','btn-stop','btn-restart'].forEach(id =>
@@ -437,11 +462,11 @@
         setFeedback(fb, 'err', d.error || 'Action failed.');
       } else {
         setFeedback(fb, 'ok', capitalize(action) + ' successful.');
-        await refreshStatus();
       }
     } catch {
       setFeedback(fb, 'err', 'Network error. Please try again.');
     } finally {
+      polling = false;
       await refreshStatus();
     }
   }
@@ -482,6 +507,7 @@
     const btn = document.getElementById('btn-upload');
     btn.disabled = true;
     btn.textContent = 'Uploading…';
+    polling = true;
 
     const form = new FormData();
     form.append('world', fileInput.files[0]);
@@ -500,6 +526,7 @@
     } catch {
       setFeedback(fb, 'err', 'Network error. Please try again.');
     } finally {
+      polling = false;
       btn.textContent = 'Upload & Replace World';
       await refreshStatus();
     }
