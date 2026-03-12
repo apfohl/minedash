@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // resolveWorldPath returns the world directory path.
@@ -222,25 +223,24 @@ func unpackZip(zr *zip.Reader, destDir string) error {
 	return nil
 }
 
-// zipTopPrefix returns the common top-level directory prefix all entries share, or "".
+// zipTopPrefix returns the common top-level directory prefix all ZIP entries share, or "".
+// ZIP entry paths always use forward slashes per spec, so we split on "/" directly.
 func zipTopPrefix(zr *zip.Reader) string {
 	if len(zr.File) == 0 {
 		return ""
 	}
 	prefix := ""
 	for _, f := range zr.File {
-		parts := filepath.SplitList(f.Name)
-		if len(parts) < 2 {
-			return "" // at least one file at root level — no prefix
+		parts := strings.SplitN(f.Name, "/", 2)
+		if len(parts) < 2 || parts[1] == "" {
+			// Entry sits at root level (no slash) or is the top-level dir entry itself.
+			return ""
 		}
-		top := filepath.Dir(f.Name)
-		for filepath.Dir(top) != "." && filepath.Dir(top) != "/" {
-			top = filepath.Dir(top)
-		}
+		top := parts[0]
 		if prefix == "" {
 			prefix = top
 		} else if prefix != top {
-			return "" // inconsistent prefix
+			return "" // inconsistent top-level directory — no common prefix
 		}
 	}
 	return prefix
