@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -88,18 +89,20 @@ func streamWorldZip(worldPath string, w io.Writer) error {
 // atomically replaces worldPath with the ZIP contents, then chowns the new tree to uid:gid
 // so the Minecraft container (default 1000:1000) can read and write it.
 func receiveWorldUpload(r *http.Request, worldPath string, uid, gid int) error {
+	log.Printf("upload: parsing multipart form")
 	// 2 GB max upload size
 	if err := r.ParseMultipartForm(2 << 30); err != nil {
 		return fmt.Errorf("parse form: %w", err)
 	}
 
-	file, _, err := r.FormFile("world")
+	file, header, err := r.FormFile("world")
 	if err != nil {
 		return fmt.Errorf("form file 'world': %w", err)
 	}
 	defer file.Close()
+	log.Printf("upload: received file %q", header.Filename)
 
-	// Write the upload to a temp file so we can use zip.OpenReader which needs io.ReaderAt + size.
+	// Write the upload to a temp file so we can use zip.NewReader which needs io.ReaderAt + size.
 	tmp, err := os.CreateTemp("", "minedash-upload-*.zip")
 	if err != nil {
 		return fmt.Errorf("temp file: %w", err)
@@ -111,15 +114,25 @@ func receiveWorldUpload(r *http.Request, worldPath string, uid, gid int) error {
 	if err != nil {
 		return fmt.Errorf("write temp: %w", err)
 	}
+	log.Printf("upload: wrote %.2f MB to temp file %s", float64(size)/(1024*1024), tmp.Name())
 
 	zr, err := zip.NewReader(tmp, size)
 	if err != nil {
 		return fmt.Errorf("open zip: %w", err)
 	}
+	log.Printf("upload: ZIP contains %d entries", len(zr.File))
 
-	// Validate that the ZIP contains a level.dat at the root level of the world.
+	// Validate that the ZIP contains a level.dat.
 	if err := validateWorldZip(zr); err != nil {
 		return err
+	}
+	log.Printf("upload: ZIP validated — level.dat found")
+
+	prefix := zipTopPrefix(zr)
+	if prefix != "" {
+		log.Printf("upload: stripping top-level prefix %q from ZIP entries", prefix)
+	} else {
+		log.Printf("upload: ZIP entries are at root level, no prefix to strip")
 	}
 
 	// Unpack to a temporary directory next to the world so rename is atomic (same filesystem).
@@ -130,31 +143,40 @@ func receiveWorldUpload(r *http.Request, worldPath string, uid, gid int) error {
 	}
 	defer os.RemoveAll(tmpDir) // cleaned up on error; on success this is already renamed away
 
-	if err := unpackZip(zr, tmpDir); err != nil {
+	count, err := unpackZip(zr, tmpDir)
+	if err != nil {
 		return fmt.Errorf("unpack zip: %w", err)
 	}
+	log.Printf("upload: unpacked %d files to %s", count, tmpDir)
 
 	// Rename current world to world.old (overwrites previous backup).
 	oldPath := filepath.Join(parent, "world.old")
 	if _, err := os.Stat(worldPath); err == nil {
+		log.Printf("upload: removing previous backup %s", oldPath)
 		if err := os.RemoveAll(oldPath); err != nil {
 			return fmt.Errorf("remove old backup: %w", err)
 		}
+		log.Printf("upload: backing up current world %s → %s", worldPath, oldPath)
 		if err := os.Rename(worldPath, oldPath); err != nil {
 			return fmt.Errorf("backup current world: %w", err)
 		}
+	} else {
+		log.Printf("upload: no existing world at %s, skipping backup", worldPath)
 	}
 
 	// Atomic swap: move tmpDir into place.
+	log.Printf("upload: swapping new world into place at %s", worldPath)
 	if err := os.Rename(tmpDir, worldPath); err != nil {
 		return fmt.Errorf("swap world: %w", err)
 	}
 
 	// Chown the new world tree so the Minecraft container (uid:gid) can access it.
+	log.Printf("upload: chowning world tree to %d:%d", uid, gid)
 	if err := chownTree(worldPath, uid, gid); err != nil {
 		return fmt.Errorf("chown world: %w", err)
 	}
 
+	log.Printf("upload: complete — world replaced at %s", worldPath)
 	return nil
 }
 
@@ -179,10 +201,12 @@ func validateWorldZip(zr *zip.Reader) error {
 }
 
 // unpackZip extracts all files from zr into destDir, stripping the top-level directory prefix.
-func unpackZip(zr *zip.Reader, destDir string) error {
+// Returns the number of files extracted (directories not counted).
+func unpackZip(zr *zip.Reader, destDir string) (int, error) {
 	// Determine common prefix (the top-level folder inside the ZIP, if any).
 	prefix := zipTopPrefix(zr)
 
+	count := 0
 	for _, f := range zr.File {
 		rel := f.Name
 		if prefix != "" {
@@ -193,34 +217,35 @@ func unpackZip(zr *zip.Reader, destDir string) error {
 
 		if f.FileInfo().IsDir() {
 			if err := os.MkdirAll(dest, 0755); err != nil {
-				return err
+				return count, err
 			}
 			continue
 		}
 
 		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
-			return err
+			return count, err
 		}
 
 		out, err := os.Create(dest)
 		if err != nil {
-			return err
+			return count, err
 		}
 
 		rc, err := f.Open()
 		if err != nil {
 			out.Close()
-			return err
+			return count, err
 		}
 
 		_, err = io.Copy(out, rc)
 		rc.Close()
 		out.Close()
 		if err != nil {
-			return err
+			return count, err
 		}
+		count++
 	}
-	return nil
+	return count, nil
 }
 
 // zipTopPrefix returns the common top-level directory prefix all ZIP entries share, or "".

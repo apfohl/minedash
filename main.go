@@ -177,6 +177,23 @@ func indexHandler(tmpl *template.Template) http.Handler {
 	})
 }
 
+// logRequest logs the remote address, forwarded-for header, and all request headers.
+func logRequest(r *http.Request, action string) {
+	realIP := r.Header.Get("X-Forwarded-For")
+	if realIP == "" {
+		realIP = r.Header.Get("X-Real-IP")
+	}
+	if realIP == "" {
+		realIP = r.RemoteAddr
+	}
+	log.Printf("%s: request from %s", action, realIP)
+	for name, values := range r.Header {
+		for _, v := range values {
+			log.Printf("%s: header %s: %s", action, name, v)
+		}
+	}
+}
+
 // statusHandler returns the current MC container state.
 func statusHandler(d *dockerService) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -192,10 +209,13 @@ func statusHandler(d *dockerService) http.Handler {
 // startHandler starts the MC container.
 func startHandler(d *dockerService) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logRequest(r, "start")
 		if err := d.start(r.Context()); err != nil {
+			log.Printf("start: failed: %v", err)
 			errorJSON(w, http.StatusInternalServerError, fmt.Sprintf("failed to start: %v", err))
 			return
 		}
+		log.Printf("start: container started successfully")
 		writeJSON(w, http.StatusOK, map[string]string{"status": "started"})
 	})
 }
@@ -203,10 +223,13 @@ func startHandler(d *dockerService) http.Handler {
 // stopHandler stops the MC container gracefully.
 func stopHandler(d *dockerService) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logRequest(r, "stop")
 		if err := d.stop(r.Context()); err != nil {
+			log.Printf("stop: failed: %v", err)
 			errorJSON(w, http.StatusInternalServerError, fmt.Sprintf("failed to stop: %v", err))
 			return
 		}
+		log.Printf("stop: container stopped successfully")
 		writeJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
 	})
 }
@@ -214,10 +237,13 @@ func stopHandler(d *dockerService) http.Handler {
 // restartHandler restarts the MC container.
 func restartHandler(d *dockerService) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logRequest(r, "restart")
 		if err := d.restart(r.Context()); err != nil {
+			log.Printf("restart: failed: %v", err)
 			errorJSON(w, http.StatusInternalServerError, fmt.Sprintf("failed to restart: %v", err))
 			return
 		}
+		log.Printf("restart: container restarted successfully")
 		writeJSON(w, http.StatusOK, map[string]string{"status": "restarted"})
 	})
 }
@@ -226,29 +252,35 @@ func restartHandler(d *dockerService) http.Handler {
 // The server must be stopped before downloading.
 func downloadHandler(d *dockerService, cfg Config) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logRequest(r, "download")
 		state, err := d.status(r.Context())
 		if err != nil {
 			errorJSON(w, http.StatusInternalServerError, fmt.Sprintf("failed to get status: %v", err))
 			return
 		}
 		if state != "stopped" {
+			log.Printf("download: rejected — server is %s", state)
 			errorJSON(w, http.StatusConflict, "server must be stopped before downloading the world")
 			return
 		}
 
 		worldPath, err := resolveWorldPath(cfg)
 		if err != nil {
+			log.Printf("download: world not found: %v", err)
 			errorJSON(w, http.StatusInternalServerError, fmt.Sprintf("world not found: %v", err))
 			return
 		}
 
 		filename := fmt.Sprintf("world-%s.zip", time.Now().UTC().Format("2006-01-02T15-04-05"))
+		log.Printf("download: streaming %s from %s", filename, worldPath)
 		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 		w.Header().Set("Content-Type", "application/zip")
 
 		if err := streamWorldZip(worldPath, w); err != nil {
-			log.Printf("world zip stream error: %v", err)
+			log.Printf("download: stream error: %v", err)
+			return
 		}
+		log.Printf("download: complete: %s", filename)
 	})
 }
 
@@ -256,23 +288,27 @@ func downloadHandler(d *dockerService, cfg Config) http.Handler {
 // The server must be stopped before uploading.
 func uploadHandler(d *dockerService, cfg Config) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logRequest(r, "upload")
 		state, err := d.status(r.Context())
 		if err != nil {
 			errorJSON(w, http.StatusInternalServerError, fmt.Sprintf("failed to get status: %v", err))
 			return
 		}
 		if state != "stopped" {
+			log.Printf("upload: rejected — server is %s", state)
 			errorJSON(w, http.StatusConflict, "server must be stopped before uploading a world")
 			return
 		}
 
 		worldPath, err := resolveWorldPath(cfg)
 		if err != nil {
+			log.Printf("upload: world not found: %v", err)
 			errorJSON(w, http.StatusInternalServerError, fmt.Sprintf("world not found: %v", err))
 			return
 		}
 
 		if err := receiveWorldUpload(r, worldPath, cfg.MCUID, cfg.MCGID); err != nil {
+			log.Printf("upload: failed: %v", err)
 			errorJSON(w, http.StatusBadRequest, fmt.Sprintf("upload failed: %v", err))
 			return
 		}
