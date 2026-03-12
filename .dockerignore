@@ -1,0 +1,13 @@
+# compiled binary
+minedash
+
+# local config (never bake secrets into the image)
+.env
+compose.yml
+
+# world backups (can be large)
+backups/
+
+# git metadata
+.git
+.gitignore

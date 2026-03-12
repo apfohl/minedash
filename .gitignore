@@ -4,3 +4,6 @@ minedash
 # local config
 .env
 compose.yml
+
+# world backups
+backups/
