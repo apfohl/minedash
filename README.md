@@ -22,7 +22,8 @@ download and upload the world as a ZIP file.
 
 ## Screenshots
 
-> Login page and dashboard with Minecraft-green dark theme.
+![Dashboard](dashboard.png)
+![Login](login.png)
 
 ## Requirements
 
