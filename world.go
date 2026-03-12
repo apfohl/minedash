@@ -84,8 +84,9 @@ func streamWorldZip(worldPath string, w io.Writer) error {
 }
 
 // receiveWorldUpload reads a multipart ZIP upload, validates it contains level.dat,
-// then atomically replaces worldPath with the ZIP contents.
-func receiveWorldUpload(r *http.Request, worldPath string) error {
+// atomically replaces worldPath with the ZIP contents, then chowns the new tree to uid:gid
+// so the Minecraft container (default 1000:1000) can read and write it.
+func receiveWorldUpload(r *http.Request, worldPath string, uid, gid int) error {
 	// 2 GB max upload size
 	if err := r.ParseMultipartForm(2 << 30); err != nil {
 		return fmt.Errorf("parse form: %w", err)
@@ -148,7 +149,22 @@ func receiveWorldUpload(r *http.Request, worldPath string) error {
 		return fmt.Errorf("swap world: %w", err)
 	}
 
+	// Chown the new world tree so the Minecraft container (uid:gid) can access it.
+	if err := chownTree(worldPath, uid, gid); err != nil {
+		return fmt.Errorf("chown world: %w", err)
+	}
+
 	return nil
+}
+
+// chownTree recursively sets ownership of root and all contents to uid:gid.
+func chownTree(root string, uid, gid int) error {
+	return filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		return os.Lchown(path, uid, gid)
+	})
 }
 
 // validateWorldZip checks that the ZIP contains a level.dat somewhere at depth ≤ 2.

@@ -27,6 +27,8 @@ services:
       - AUTH_PASSWORD_HASH=       # bcrypt hash: htpasswd -bnBC 12 "" pw | tr -d ':\n'
       - JWT_SECRET=               # openssl rand -hex 32
       - PORT=8080
+      - MC_UID=1000               # must match PUID of the minecraft container
+      - MC_GID=1000               # must match PGID of the minecraft container
     networks:
       - gateway
     labels:

@@ -30,6 +30,8 @@ type Config struct {
 	JWTSecret        string
 	Port             string
 	WorldPath        string // optional override; empty means auto-detect
+	MCUID            int    // uid to chown the world to after upload (default 1000)
+	MCGID            int    // gid to chown the world to after upload (default 1000)
 }
 
 func loadConfig() Config {
@@ -41,7 +43,19 @@ func loadConfig() Config {
 		JWTSecret:        getEnv("JWT_SECRET", ""),
 		Port:             getEnv("PORT", "8080"),
 		WorldPath:        getEnv("WORLD_PATH", ""),
+		MCUID:            getEnvInt("MC_UID", 1000),
+		MCGID:            getEnvInt("MC_GID", 1000),
 	}
+}
+
+func getEnvInt(key string, fallback int) int {
+	if v, ok := os.LookupEnv(key); ok {
+		var n int
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil {
+			return n
+		}
+	}
+	return fallback
 }
 
 func getEnv(key, fallback string) string {
@@ -252,7 +266,7 @@ func uploadHandler(d *dockerService, cfg Config) http.Handler {
 			return
 		}
 
-		if err := receiveWorldUpload(r, worldPath); err != nil {
+		if err := receiveWorldUpload(r, worldPath, cfg.MCUID, cfg.MCGID); err != nil {
 			errorJSON(w, http.StatusBadRequest, fmt.Sprintf("upload failed: %v", err))
 			return
 		}
