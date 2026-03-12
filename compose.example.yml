@@ -22,10 +22,8 @@ services:
       - mc-data:/mc-data
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      # Stack name is auto-detected from this container's own Compose labels.
-      # Override only if auto-detection fails (e.g. running outside Compose).
-      # MC_STACK_NAME=mystack
-      - MC_SERVICE_NAME=minecraft  # Compose service name of the MC container
+      - MC_STACK_NAME=${COMPOSE_PROJECT_NAME}  # auto-filled by Compose at deploy time
+      - MC_SERVICE_NAME=minecraft              # Compose service name of the MC container
       - AUTH_PASSWORD_HASH=        # bcrypt hash: ./minedash genpw
       - JWT_SECRET=                # openssl rand -hex 32
       - PORT=8080
