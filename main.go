@@ -177,7 +177,7 @@ func indexHandler(tmpl *template.Template) http.Handler {
 	})
 }
 
-// logRequest logs the remote address, forwarded-for header, and all request headers.
+// logRequest logs the action and the real remote address.
 func logRequest(r *http.Request, action string) {
 	realIP := r.Header.Get("X-Forwarded-For")
 	if realIP == "" {
@@ -187,11 +187,6 @@ func logRequest(r *http.Request, action string) {
 		realIP = r.RemoteAddr
 	}
 	log.Printf("%s: request from %s", action, realIP)
-	for name, values := range r.Header {
-		for _, v := range values {
-			log.Printf("%s: header %s: %s", action, name, v)
-		}
-	}
 }
 
 // statusHandler returns the current MC container state.
