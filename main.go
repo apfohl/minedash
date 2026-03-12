@@ -108,7 +108,7 @@ func main() {
 	mux.HandleFunc("POST /logout", logoutHandler())
 
 	// Protected routes
-	mux.Handle("GET /{$}", jwtMiddleware(cfg, indexHandler(tmpl)))
+	mux.Handle("GET /{$}", indexHandler(tmpl))
 	mux.Handle("GET /api/status", jwtMiddleware(cfg, statusHandler(dockerSvc)))
 	mux.Handle("POST /api/start", jwtMiddleware(cfg, startHandler(dockerSvc)))
 	mux.Handle("POST /api/stop", jwtMiddleware(cfg, stopHandler(dockerSvc)))
