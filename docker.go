@@ -14,52 +14,48 @@ const (
 	labelService = "com.docker.compose.service"
 )
 
-// dockerService wraps the Docker SDK client and targets a single named container.
+// dockerService wraps the Docker SDK client and targets a single Minecraft container.
+// The container is resolved by label on every operation so that container recreations
+// (which assign a new ID) are handled transparently.
 type dockerService struct {
 	client        *client.Client
-	containerName string
+	containerName string // direct name/ID override — used as-is when set
+	stackName     string // com.docker.compose.project label value
+	serviceName   string // com.docker.compose.service label value
 }
 
-// newDockerService creates a dockerService, resolving the target container name using
-// the following priority order:
-//
-//  1. MC_CONTAINER_NAME — use directly (explicit override, no label lookup)
-//  2. MC_STACK_NAME + MC_SERVICE_NAME — look up container by Compose labels
+// newDockerService creates a dockerService. Container resolution is deferred to each
+// operation so that a recreated MC container is always found correctly.
 func newDockerService(cfg Config) (*dockerService, error) {
 	c, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		return nil, fmt.Errorf("docker client: %w", err)
 	}
 
-	name, err := resolveContainerName(context.Background(), c, cfg)
-	if err != nil {
+	if cfg.MCContainerName == "" && cfg.MCStackName == "" {
 		_ = c.Close()
-		return nil, err
-	}
-
-	return &dockerService{client: c, containerName: name}, nil
-}
-
-// resolveContainerName determines the target MC container name/ID.
-func resolveContainerName(ctx context.Context, c *client.Client, cfg Config) (string, error) {
-	// Priority 1: explicit container name override.
-	if cfg.MCContainerName != "" {
-		return cfg.MCContainerName, nil
-	}
-
-	// Priority 2: look up by Compose labels.
-	if cfg.MCStackName == "" {
-		return "", fmt.Errorf(
+		return nil, fmt.Errorf(
 			"MC_STACK_NAME is required; set it to ${COMPOSE_PROJECT_NAME} in your compose.yml, " +
 				"or set MC_CONTAINER_NAME for a direct name override")
 	}
 
-	id, err := findContainerByLabels(ctx, c, cfg.MCStackName, cfg.MCServiceName)
-	if err != nil {
-		return "", fmt.Errorf("finding minecraft container (stack=%q service=%q): %w",
-			cfg.MCStackName, cfg.MCServiceName, err)
+	return &dockerService{
+		client:        c,
+		containerName: cfg.MCContainerName,
+		stackName:     cfg.MCStackName,
+		serviceName:   cfg.MCServiceName,
+	}, nil
+}
+
+// resolve returns the current container ID/name for the MC container.
+// When containerName is set it is returned directly.
+// Otherwise the container is looked up fresh by Compose labels on every call,
+// so that a recreated container (new ID) is always found.
+func (d *dockerService) resolve(ctx context.Context) (string, error) {
+	if d.containerName != "" {
+		return d.containerName, nil
 	}
-	return id, nil
+	return findContainerByLabels(ctx, d.client, d.stackName, d.serviceName)
 }
 
 // findContainerByLabels returns the ID of the first container matching the given
@@ -89,10 +85,17 @@ func (d *dockerService) close() {
 }
 
 // status returns one of: "running", "starting", "stopping", "stopped", "unhealthy", "unknown".
-// When the container has a healthcheck (itzg/minecraft-server ships one by default),
+// When the container has a healthcheck (itzg/docker-minecraft-server ships one by default),
 // the health state is used to distinguish a fully running server from one still booting.
+// If the container does not exist at all, "stopped" is returned.
 func (d *dockerService) status(ctx context.Context) (string, error) {
-	info, err := d.client.ContainerInspect(ctx, d.containerName)
+	id, err := d.resolve(ctx)
+	if err != nil {
+		// Container not found via labels = it doesn't exist yet, treat as stopped.
+		return "stopped", nil
+	}
+
+	info, err := d.client.ContainerInspect(ctx, id)
 	if err != nil {
 		if client.IsErrNotFound(err) {
 			return "stopped", nil
@@ -129,7 +132,11 @@ func (d *dockerService) status(ctx context.Context) (string, error) {
 
 // start starts the container.
 func (d *dockerService) start(ctx context.Context) error {
-	if err := d.client.ContainerStart(ctx, d.containerName, container.StartOptions{}); err != nil {
+	id, err := d.resolve(ctx)
+	if err != nil {
+		return fmt.Errorf("resolve: %w", err)
+	}
+	if err := d.client.ContainerStart(ctx, id, container.StartOptions{}); err != nil {
 		return fmt.Errorf("start: %w", err)
 	}
 	return nil
@@ -137,8 +144,12 @@ func (d *dockerService) start(ctx context.Context) error {
 
 // stop gracefully stops the container (SIGTERM, 10 s timeout).
 func (d *dockerService) stop(ctx context.Context) error {
+	id, err := d.resolve(ctx)
+	if err != nil {
+		return fmt.Errorf("resolve: %w", err)
+	}
 	timeout := 10
-	if err := d.client.ContainerStop(ctx, d.containerName, container.StopOptions{Timeout: &timeout}); err != nil {
+	if err := d.client.ContainerStop(ctx, id, container.StopOptions{Timeout: &timeout}); err != nil {
 		return fmt.Errorf("stop: %w", err)
 	}
 	return nil
@@ -146,8 +157,12 @@ func (d *dockerService) stop(ctx context.Context) error {
 
 // restart restarts the container.
 func (d *dockerService) restart(ctx context.Context) error {
+	id, err := d.resolve(ctx)
+	if err != nil {
+		return fmt.Errorf("resolve: %w", err)
+	}
 	timeout := 10
-	if err := d.client.ContainerRestart(ctx, d.containerName, container.StopOptions{Timeout: &timeout}); err != nil {
+	if err := d.client.ContainerRestart(ctx, id, container.StopOptions{Timeout: &timeout}); err != nil {
 		return fmt.Errorf("restart: %w", err)
 	}
 	return nil
