@@ -124,6 +124,7 @@ func main() {
 	mux := http.NewServeMux()
 
 	// Public routes
+	mux.HandleFunc("GET /health", healthHandler())
 	mux.HandleFunc("POST /login", loginHandler(cfg))
 	mux.HandleFunc("POST /logout", logoutHandler())
 
@@ -165,6 +166,13 @@ func main() {
 	}
 
 	log.Println("stopped")
+}
+
+// healthHandler returns 200 OK to confirm the service is running.
+func healthHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}
 }
 
 // indexHandler serves the main UI page.
