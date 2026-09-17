@@ -1,0 +1,132 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/docker/docker/client"
+)
+
+func TestBackupProcess(t *testing.T) {
+	for _, tc := range []struct {
+		command string
+		want    bool
+	}{
+		{"/usr/bin/backup", true}, {"/bin/sh /usr/bin/backup", true}, {"/bin/sh -c backup", true}, {"/bin/sh /usr/bin/backup.sh", false}, {"crond -f", false}, {"sleep 5", false},
+	} {
+		if backupProcess(tc.command) != tc.want {
+			t.Fatalf("%q", tc.command)
+		}
+	}
+}
+
+func TestManualBackupLifecycleAndGuards(t *testing.T) {
+	running := false
+	exitCode := 0
+	scheduled := false
+	failTop := false
+	created := 0
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		path := strings.TrimPrefix(r.URL.Path, "/v1.47")
+		switch {
+		case path == "/containers/json":
+			if !strings.Contains(r.URL.Query().Get("filters"), "backup") {
+				t.Error("missing backup service filter")
+			}
+			w.Write([]byte(`[{"Id":"backup-container"}]`))
+		case path == "/containers/backup-container/json":
+			w.Write([]byte(`{"Id":"backup-container","State":{"Running":true}}`))
+		case path == "/containers/backup-container/top":
+			if failTop {
+				w.WriteHeader(500)
+				w.Write([]byte(`{"message":"unavailable"}`))
+				return
+			}
+			process := "crond -f"
+			if scheduled {
+				process = "/usr/bin/backup"
+			}
+			json.NewEncoder(w).Encode(map[string]any{"Titles": []string{"COMMAND"}, "Processes": [][]string{{process}}})
+		case path == "/containers/backup-container/exec":
+			var body struct{ Cmd []string }
+			json.NewDecoder(r.Body).Decode(&body)
+			if len(body.Cmd) != 1 || body.Cmd[0] != "backup" {
+				t.Error("wrong command")
+			}
+			created++
+			w.WriteHeader(201)
+			w.Write([]byte(`{"Id":"job"}`))
+		case path == "/exec/job/start":
+			running = true
+			w.WriteHeader(200)
+		case path == "/exec/job/json":
+			json.NewEncoder(w).Encode(map[string]any{"Running": running, "ExitCode": exitCode})
+		default:
+			t.Errorf("unexpected request %s", path)
+			w.WriteHeader(404)
+		}
+	})
+	dockerClient, e := client.NewClientWithOpts(client.WithHost("http://docker.test"), client.WithVersion("1.47"), client.WithHTTPClient(&http.Client{Transport: backupTestTransport{handler}}))
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer dockerClient.Close()
+	jobs := &backupJobs{docker: &dockerService{client: dockerClient, stackName: "stack"}, service: "backup"}
+	original := manualBackups
+	manualBackups = jobs
+	defer func() { manualBackups = original }()
+	if s := jobs.snapshot(context.Background()); s.State != "idle" || !s.Available {
+		t.Fatalf("%+v", s)
+	}
+	w := httptest.NewRecorder()
+	createBackupHandler(jobs).ServeHTTP(w, httptest.NewRequest("POST", "/api/backups", nil))
+	if w.Code != 202 || created != 1 {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	w = httptest.NewRecorder()
+	createBackupHandler(jobs).ServeHTTP(w, httptest.NewRequest("POST", "/api/backups", nil))
+	if w.Code != 409 || created != 1 {
+		t.Fatal("duplicate backup allowed")
+	}
+	called := false
+	guard := guardedVolumeAction(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	w = httptest.NewRecorder()
+	guard.ServeHTTP(w, httptest.NewRequest("POST", "/api/start", nil))
+	if w.Code != 409 || called {
+		t.Fatal("startup allowed during backup")
+	}
+	running = false
+	if s := jobs.snapshot(context.Background()); s.State != "succeeded" {
+		t.Fatalf("%+v", s)
+	}
+	scheduled = true
+	if !backupBlocksControls() {
+		t.Fatal("scheduled backup ignored")
+	}
+	scheduled = false
+	failTop = true
+	if !backupBlocksControls() {
+		t.Fatal("unknown backup state allowed startup")
+	}
+	failTop = false
+	w = httptest.NewRecorder()
+	createBackupHandler(jobs).ServeHTTP(w, httptest.NewRequest("POST", "/api/backups", nil))
+	running = false
+	exitCode = 1
+	if s := jobs.snapshot(context.Background()); s.State != "failed" {
+		t.Fatalf("%+v", s)
+	}
+}
+
+type backupTestTransport struct{ handler http.Handler }
+
+func (t backupTestTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	w := httptest.NewRecorder()
+	t.handler.ServeHTTP(w, r)
+	return w.Result(), nil
+}

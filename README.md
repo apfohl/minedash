@@ -21,7 +21,7 @@ download and upload the world as a ZIP file.
 - **Single binary** — Go backend with the UI embedded at compile time; the
   Docker image is ~14 MB
 
-- **Backup list** — browse dated archives newest first, with timestamps, sizes, and total storage. The Backups category appears only when matching files exist.
+- **Backups** — create backups through the Compose backup service, browse and download dated archives, and restore the full server volume while stopped. The category appears when matching archives or the backup service are available.
 
 ## Screenshots
 
@@ -107,6 +107,7 @@ environment always take precedence.
 | `MC_UID` | no | `1000` | UID to assign to the world folder after upload; must match `PUID` in the itzg container |
 | `MC_GID` | no | `1000` | GID to assign to the world folder after upload; must match `PGID` in the itzg container |
 | `PORT` | no | `8080` | Internal HTTP listen port |
+| `BACKUP_SERVICE_NAME` | no | `backup` | Compose service running offen/docker-volume-backup in the Minecraft stack |
 | `BACKUP_PATH` | no | `/backups` | Directory containing mounted backup archives |
 | `BACKUP_PREFIX` | no | `world` | Filename prefix for dated `.tar.gz` backups |
 | `WORLD_PATH` | no | auto-detect | Explicit path to the world folder; skips scanning `/mc-data` for `level.dat` |
@@ -196,7 +197,7 @@ environment:
 
 Only regular files named `<prefix>-YYYY-MM-DDTHH-MM-SS.tar.gz` are listed.
 `grassblock.latest.tar.gz`, symlinks, directories, and unrelated files are ignored.
-The category stays hidden if the mount is missing or has no matching backups.
+The category is available when matching backups or a backup service are found.
 The list refreshes automatically every 30 seconds. Dates and times come from
 filenames and are displayed without timezone conversion. MineDash reads only
 file metadata for the list. Each backup has a **Download** action that streams
@@ -222,7 +223,24 @@ that directory for recovery. Individual file moves are atomic, but the full
 volume replacement is not. Starting the container directly through Docker
 bypasses MineDash's guard. Run only one MineDash instance per server volume.
 
-MineDash does not delete or create backup archives.
+The central **Create backup** button opens a native confirmation dialog explaining
+that Minecraft will be stopped during the backup. MineDash executes `backup` in
+the `offen/docker-volume-backup` service in the same Compose stack (default service
+name `backup`; override with `BACKUP_SERVICE_NAME`). This is the Docker API
+equivalent of `docker compose exec backup backup`; see the
+[manual trigger documentation](https://offen.github.io/docker-volume-backup/how-tos/manual-trigger.html).
+When `MC_CONTAINER_NAME` is used, the stack is read from that container's Compose
+labels. The backup service must be running and retain its existing stop/restart
+configuration, including the Minecraft stop-during-backup label.
+
+MineDash does not stop or restart Minecraft for backup creation. It displays
+backup progress and the process exit result on Backups, shows **backing up** in
+server status, and blocks server controls, world transfers, and restore while a
+backup is running. It also detects scheduled backup processes in the service and
+running processes after a MineDash restart. The last manual completion result is
+kept until MineDash restarts. If Docker cannot confirm backup process status,
+controls remain blocked until the check succeeds. The backup list refreshes when
+the process finishes. MineDash does not delete backup archives.
 Set `BACKUP_PATH` if you use a different internal mount point.
 
 Categories can be linked directly with `/dashboard#status`, `/dashboard#world`,

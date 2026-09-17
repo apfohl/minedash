@@ -29,6 +29,7 @@ services:
       - AUTH_PASSWORD_HASH=        # bcrypt hash: ./minedash genpw — escape each $ as $$
       - JWT_SECRET=                # openssl rand -hex 32
       - PORT=8080
+      - BACKUP_SERVICE_NAME=backup # offen/docker-volume-backup service in this stack
       - BACKUP_PATH=/backups
       - BACKUP_PREFIX=world        # e.g. grassblock for grassblock-<timestamp>.tar.gz
       - MC_UID=1000                # must match PUID of the minecraft container

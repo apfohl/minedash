@@ -125,6 +125,7 @@
     .badge-running   { color: var(--green-bright); border-color: var(--green-dim); background: rgba(95,168,63,0.1);   }
     .badge-stopped   { color: #a0a0a0;             border-color: #3a3a3a;         background: rgba(80,80,80,0.1);    }
     .badge-starting  { color: var(--orange);        border-color: #7a4a10;         background: rgba(212,128,26,0.1);  }
+    .badge-backing-up { color: var(--orange); border-color: #7a4a10; background: rgba(212,128,26,0.1); }
     .badge-stopping  { color: var(--orange);        border-color: #7a4a10;         background: rgba(212,128,26,0.1);  }
     .badge-unhealthy { color: var(--red);           border-color: var(--red-dim);  background: rgba(192,57,43,0.1);   }
     .badge-unknown   { color: #a0a0a0;              border-color: #3a3a3a;         background: rgba(80,80,80,0.1);    }
@@ -134,6 +135,7 @@
       50%       { opacity: 0.3; }
     }
     .badge-starting::before,
+    .badge-backing-up::before,
     .badge-stopping::before,
     .badge-unhealthy::before { animation: pulse 1.2s ease-in-out infinite; }
 
@@ -161,10 +163,10 @@
         const response = await fetch('/api/public/status', { cache: 'no-store' });
         if (!response.ok) throw new Error('Status unavailable');
         const data = await response.json();
-        const states = ['running', 'stopped', 'starting', 'stopping', 'unhealthy', 'unknown'];
+        const states = ['running', 'stopped', 'starting', 'stopping', 'unhealthy', 'unknown', 'backing-up'];
         const status = states.includes(data.status) ? data.status : 'unknown';
         badge.className = 'badge badge-' + status;
-        badge.textContent = status;
+        badge.textContent = status === 'backing-up' ? 'backing up' : status;
         hint.textContent = 'Updates automatically every 3 seconds.';
       } catch {
         badge.className = 'badge badge-unknown';

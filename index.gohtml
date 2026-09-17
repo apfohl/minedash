@@ -179,6 +179,7 @@
     .badge-running   { color: var(--green-bright); border-color: var(--green-dim); background: rgba(95,168,63,0.1);   }
     .badge-stopped   { color: #a0a0a0;             border-color: #3a3a3a;         background: rgba(80,80,80,0.1);    }
     .badge-starting  { color: var(--orange);        border-color: #7a4a10;         background: rgba(212,128,26,0.1);  }
+    .badge-backing-up { color: var(--orange); border-color: #7a4a10; background: rgba(212,128,26,0.1); }
     .badge-stopping  { color: var(--orange);        border-color: #7a4a10;         background: rgba(212,128,26,0.1);  }
     .badge-unhealthy { color: var(--red);           border-color: var(--red-dim);  background: rgba(192,57,43,0.1);   }
     .badge-unknown   { color: #a0a0a0;              border-color: #3a3a3a;         background: rgba(80,80,80,0.1);    }
@@ -188,6 +189,7 @@
       50%       { opacity: 0.3; }
     }
     .badge-starting::before,
+    .badge-backing-up::before,
     .badge-stopping::before,
     .badge-unhealthy::before { animation: pulse 1.2s ease-in-out infinite; }
 
@@ -328,7 +330,11 @@
   </section>
 
   <section class="card" id="panel-backups" aria-labelledby="category-backups" hidden>
-    <div class="card-title">Available Backups</div>
+    <div class="card-title">Backups</div>
+    <div style="text-align:center; margin-bottom:20px">
+      <span id="create-backup-wrapper"><button class="btn btn-ghost" id="btn-create-backup" disabled onclick="document.getElementById('backup-dialog').showModal()">Create backup</button></span>
+    </div>
+    <p id="backup-job-status" class="hint" role="status" aria-live="polite">Checking backup service…</p>
     <p class="backup-summary" id="backup-summary"></p>
     <div id="backup-feedback" class="feedback" role="status"></div>
     <ul class="backup-list" id="backup-list"></ul>
@@ -336,6 +342,12 @@
   </section>
 </div>
 
+<dialog id="backup-dialog" aria-labelledby="backup-dialog-title" style="margin:auto; max-width:480px; padding:24px; background:var(--bg-card); color:var(--text); border:1px solid var(--border); border-radius:12px;">
+  <h2 id="backup-dialog-title">Create a backup?</h2>
+  <p style="margin:20px 0">The server will be stopped during the backup. The backup service will restart it afterward if it was running. Server controls will be unavailable until the backup finishes.</p>
+  <button class="btn btn-ghost" autofocus onclick="document.getElementById('backup-dialog').close()">Cancel</button>
+  <button class="btn btn-ghost" onclick="createBackup()">Create backup</button>
+</dialog>
 <dialog id="restore-dialog" style="margin:auto; max-width:480px; padding:24px; background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:12px;">
   <h2>Restore this backup?</h2>
   <p id="restore-backup-name" class="backup-name" style="white-space:pre-wrap"></p>
@@ -346,11 +358,50 @@
 <script>
   // ── state ──────────────────────────────────────────────
   let currentCategory = 'status';
+  let backupJob = {available:false, state:'unknown', message:'Checking backup service…'};
+  let backupSubmitting = false;
+  function backupBusy() { return backupSubmitting || backupJob.state === 'running' || backupJob.state === 'unknown'; }
+  function updateBackupJob(job) {
+    const wasRunning = backupJob.state === 'running';
+    backupJob = job;
+    document.getElementById('backup-job-status').textContent = job.message;
+    if (job.available) {
+      document.getElementById('category-backups').hidden = false;
+      syncCategoryFromURL();
+    }
+    applyStatus(currentStatus);
+    if (wasRunning && job.state !== 'running' && job.state !== 'unknown') refreshBackups();
+  }
+  async function refreshBackupJob() {
+    try {
+      const response = await fetch('/api/backups/status', {cache:'no-store'});
+      if (response.status === 401) { showLogin(); return; }
+      if (!response.ok) throw new Error();
+      updateBackupJob(await response.json());
+    } catch {
+      updateBackupJob({available:true,state:'unknown',message:'Backup status unavailable. Server controls are blocked until it can be checked.'});
+    }
+  }
+  async function createBackup() {
+    document.getElementById('backup-dialog').close();
+    if (backupSubmitting) return;
+    backupSubmitting = true;
+    updateBackupJob({available:true,state:'running',message:'Starting backup…'});
+    const feedback = document.getElementById('backup-feedback');
+    setFeedback(feedback, '', '');
+    try {
+      const response = await fetch('/api/backups', {method:'POST'});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not start backup.');
+      updateBackupJob(data);
+    } catch (error) { setFeedback(feedback,'err',error.message); }
+    finally { backupSubmitting = false; await refreshBackupJob(); await refreshStatus(); }
+  }
   let restoring = false;
   let pendingRestore = false;
   let selectedBackup = null;
   function updateRestoreButtons() {
-    const reason = restoring || pendingRestore ? 'A backup restore is in progress or needs recovery.' : currentStatus !== 'stopped' ? 'Stop the server to restore a backup.' : '';
+    const reason = backupBusy() ? 'A backup is running or its status cannot be confirmed.' : restoring || pendingRestore ? 'A backup restore is in progress or needs recovery.' : currentStatus !== 'stopped' ? 'Stop the server to restore a backup.' : '';
     document.querySelectorAll('.restore-button').forEach(button => {
       button.disabled = !!reason;
       button.parentElement.title = reason;
@@ -358,7 +409,7 @@
     });
   }
   function openRestore(backup) {
-    if (restoring || pendingRestore || currentStatus !== 'stopped') return;
+    if (backupBusy() || restoring || pendingRestore || currentStatus !== 'stopped') return;
     selectedBackup = backup;
     document.getElementById('restore-backup-name').textContent = backup.timestamp.replace('T', ' · ') + '\n' + backup.name;
     document.getElementById('restore-dialog').showModal();
@@ -428,6 +479,7 @@
     pollInterval = setInterval(() => {
       if (polling) return;
       refreshStatus();
+      refreshBackupJob();
       if (Date.now() - lastBackupRefresh >= 30000) refreshBackups();
     }, 3000);
   }
@@ -448,6 +500,7 @@
     document.getElementById('dashboard-view').style.display = '';
     syncCategoryFromURL();
     refreshBackups();
+    refreshBackupJob();
     startPolling();
   }
 
@@ -497,7 +550,7 @@
       if (response.status === 401) { showLogin(); return; }
       if (!response.ok) throw new Error('Unavailable');
       const data = await response.json();
-      const available = data.backups.length > 0;
+      const available = data.backups.length > 0 || backupJob.available;
       const button = document.getElementById('category-backups');
       const wasViewingBackups = currentCategory === 'backups';
       backupAvailabilityKnown = true;
@@ -616,14 +669,18 @@
   function applyStatus(s) {
     currentStatus = s;
     updateRestoreButtons();
+    const createReason = restoring || pendingRestore ? 'A restore is in progress or needs recovery.' : !backupJob.available || backupBusy() ? backupJob.message : '';
+    document.getElementById('btn-create-backup').disabled = !!createReason;
+    document.getElementById('create-backup-wrapper').title = createReason;
     const badge = document.getElementById('status-badge');
-    badge.className = 'badge badge-' + s;
-    badge.textContent = s;
+    const displayStatus = backupJob.state === 'running' || backupSubmitting ? 'backing-up' : s;
+    badge.className = 'badge badge-' + displayStatus;
+    badge.textContent = displayStatus === 'backing-up' ? 'backing up' : displayStatus;
 
-    const canStart   = s === 'stopped' && !restoring && !pendingRestore;
-    const canStop    = s === 'running' || s === 'starting' || s === 'unhealthy';
-    const canRestart = (s === 'running' || s === 'unhealthy') && !restoring && !pendingRestore;
-    const canWorld   = s === 'stopped' && !restoring && !pendingRestore;
+    const canStart   = s === 'stopped' && !restoring && !pendingRestore && !backupBusy();
+    const canStop    = (s === 'running' || s === 'starting' || s === 'unhealthy') && !backupBusy();
+    const canRestart = (s === 'running' || s === 'unhealthy') && !restoring && !pendingRestore && !backupBusy();
+    const canWorld   = s === 'stopped' && !restoring && !pendingRestore && !backupBusy();
 
     document.getElementById('btn-start').disabled    = !canStart;
     document.getElementById('btn-stop').disabled     = !canStop;
@@ -632,7 +689,7 @@
     document.getElementById('btn-upload').disabled   = !canWorld || !hasFile();
 
     const hint = document.getElementById('world-hint');
-    hint.textContent = canWorld ? '' : 'Stop the server before downloading or uploading a world.';
+    hint.textContent = backupBusy() ? 'World transfers are unavailable during a backup or while its status cannot be confirmed.' : canWorld ? '' : 'Stop the server before downloading or uploading a world.';
   }
 
   // ── server actions ─────────────────────────────────────

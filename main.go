@@ -30,31 +30,33 @@ type Config struct {
 	MCStackName     string // Compose stack name; auto-derived from own labels when empty
 	MCServiceName   string // Compose service name of the MC container (default "minecraft")
 
-	AuthPasswordHash string
-	JWTSecret        string
-	Port             string
-	WorldPath        string // optional override; empty means auto-detect
-	BackupPath       string // directory mounted into MineDash (default /backups)
-	BackupPrefix     string // dated archive filename prefix (default world)
-	MCUID            int    // uid to chown the world to after upload (default 1000)
-	MCGID            int    // gid to chown the world to after upload (default 1000)
+	AuthPasswordHash  string
+	JWTSecret         string
+	Port              string
+	WorldPath         string // optional override; empty means auto-detect
+	BackupPath        string // directory mounted into MineDash (default /backups)
+	BackupServiceName string // Compose backup service (default backup)
+	BackupPrefix      string // dated archive filename prefix (default world)
+	MCUID             int    // uid to chown the world to after upload (default 1000)
+	MCGID             int    // gid to chown the world to after upload (default 1000)
 }
 
 func loadConfig() Config {
 	_ = godotenv.Load()
 
 	return Config{
-		MCContainerName:  getEnv("MC_CONTAINER_NAME", ""),
-		MCStackName:      getEnv("MC_STACK_NAME", ""),
-		MCServiceName:    getEnv("MC_SERVICE_NAME", "minecraft"),
-		AuthPasswordHash: getEnv("AUTH_PASSWORD_HASH", ""),
-		JWTSecret:        getEnv("JWT_SECRET", ""),
-		Port:             getEnv("PORT", "8080"),
-		WorldPath:        getEnv("WORLD_PATH", ""),
-		BackupPath:       getEnv("BACKUP_PATH", "/backups"),
-		BackupPrefix:     getEnv("BACKUP_PREFIX", "world"),
-		MCUID:            getEnvInt("MC_UID", 1000),
-		MCGID:            getEnvInt("MC_GID", 1000),
+		MCContainerName:   getEnv("MC_CONTAINER_NAME", ""),
+		MCStackName:       getEnv("MC_STACK_NAME", ""),
+		MCServiceName:     getEnv("MC_SERVICE_NAME", "minecraft"),
+		AuthPasswordHash:  getEnv("AUTH_PASSWORD_HASH", ""),
+		JWTSecret:         getEnv("JWT_SECRET", ""),
+		Port:              getEnv("PORT", "8080"),
+		WorldPath:         getEnv("WORLD_PATH", ""),
+		BackupPath:        getEnv("BACKUP_PATH", "/backups"),
+		BackupServiceName: getEnv("BACKUP_SERVICE_NAME", "backup"),
+		BackupPrefix:      getEnv("BACKUP_PREFIX", "world"),
+		MCUID:             getEnvInt("MC_UID", 1000),
+		MCGID:             getEnvInt("MC_GID", 1000),
 	}
 }
 
@@ -119,6 +121,7 @@ func main() {
 		log.Fatalf("failed to connect to Docker: %v", err)
 	}
 	defer dockerSvc.close()
+	manualBackups = &backupJobs{docker: dockerSvc, service: cfg.BackupServiceName}
 
 	tmpl, err := template.ParseFS(templates, "*.gohtml")
 	if err != nil {
@@ -137,7 +140,9 @@ func main() {
 
 	// Recover interrupted restores before accepting control requests.
 	if restorePending(volumePath) {
-		if err := dockerSvc.requireStopped(context.Background()); err != nil {
+		if backupBlocksControls() {
+			log.Print("restore recovery blocked by backup activity")
+		} else if err := dockerSvc.requireStopped(context.Background()); err != nil {
 			log.Printf("restore recovery blocked: %v", err)
 		} else if err := recoverRestore(volumePath); err != nil {
 			log.Printf("restore recovery failed: %v", err)
@@ -145,6 +150,8 @@ func main() {
 	}
 
 	// Protected routes
+	mux.Handle("POST /api/backups", jwtMiddleware(cfg, createBackupHandler(manualBackups)))
+	mux.Handle("GET /api/backups/status", jwtMiddleware(cfg, backupJobStatusHandler(manualBackups)))
 	mux.Handle("GET /dashboard", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !hasSession(cfg, r) {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
@@ -157,9 +164,9 @@ func main() {
 	mux.Handle("GET /api/backups", jwtMiddleware(cfg, backupsHandler(cfg)))
 	mux.Handle("GET /api/backups/{name}/download", jwtMiddleware(cfg, backupDownloadHandler(cfg)))
 	mux.Handle("POST /api/start", jwtMiddleware(cfg, guardedVolumeAction(startHandler(dockerSvc))))
-	mux.Handle("POST /api/stop", jwtMiddleware(cfg, stopHandler(dockerSvc)))
+	mux.Handle("POST /api/stop", jwtMiddleware(cfg, guardedVolumeAction(stopHandler(dockerSvc))))
 	mux.Handle("POST /api/restart", jwtMiddleware(cfg, guardedVolumeAction(restartHandler(dockerSvc))))
-	mux.Handle("GET /api/world/download", jwtMiddleware(cfg, downloadHandler(dockerSvc, cfg)))
+	mux.Handle("GET /api/world/download", jwtMiddleware(cfg, guardedVolumeAction(downloadHandler(dockerSvc, cfg))))
 	mux.Handle("POST /api/world/upload", jwtMiddleware(cfg, guardedVolumeAction(uploadHandler(dockerSvc, cfg))))
 
 	srv := &http.Server{
@@ -216,6 +223,15 @@ func publicStatusHandler(d *dockerService) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		state, err := d.status(r.Context())
+		if manualBackups != nil {
+			job := manualBackups.snapshot(r.Context())
+			if job.State == "running" {
+				state = "backing-up"
+				err = nil
+			} else if job.State == "unknown" {
+				state = "unknown"
+			}
+		}
 		if err != nil {
 			log.Printf("public status: %v", err)
 			errorJSON(w, http.StatusServiceUnavailable, "status unavailable")
@@ -241,6 +257,15 @@ func logRequest(r *http.Request, action string) {
 func statusHandler(d *dockerService) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		state, err := d.status(r.Context())
+		if manualBackups != nil {
+			job := manualBackups.snapshot(r.Context())
+			if job.State == "running" {
+				state = "backing-up"
+				err = nil
+			} else if job.State == "unknown" {
+				state = "unknown"
+			}
+		}
 		if err != nil {
 			errorJSON(w, http.StatusInternalServerError, fmt.Sprintf("failed to get status: %v", err))
 			return
@@ -297,6 +322,7 @@ func downloadHandler(d *dockerService, cfg Config) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logRequest(r, "download")
 		state, err := d.status(r.Context())
+
 		if err != nil {
 			errorJSON(w, http.StatusInternalServerError, fmt.Sprintf("failed to get status: %v", err))
 			return
@@ -333,6 +359,7 @@ func uploadHandler(d *dockerService, cfg Config) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logRequest(r, "upload")
 		state, err := d.status(r.Context())
+
 		if err != nil {
 			errorJSON(w, http.StatusInternalServerError, fmt.Sprintf("failed to get status: %v", err))
 			return

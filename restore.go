@@ -341,6 +341,10 @@ func guardedVolumeAction(next http.Handler) http.Handler {
 			errorJSON(w, 409, "An unfinished backup restore blocks this action.")
 			return
 		}
+		if backupBlocksControls() {
+			errorJSON(w, 409, "A backup is running or its status cannot be confirmed.")
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }
