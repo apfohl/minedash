@@ -339,6 +339,7 @@
 <script>
   // ── state ──────────────────────────────────────────────
   let currentCategory = 'status';
+  let backupAvailabilityKnown = false;
   let backupsRefreshing = false;
   let lastBackupRefresh = 0;
   let currentStatus = 'unknown';
@@ -375,6 +376,9 @@
   });
 
   // ── polling ────────────────────────────────────────────
+  window.addEventListener('hashchange', syncCategoryFromURL);
+  window.addEventListener('popstate', syncCategoryFromURL);
+
   function startPolling() {
     if (pollInterval) return;
     pollInterval = setInterval(() => {
@@ -398,13 +402,33 @@
   function showDashboard() {
     document.getElementById('login-view').style.display = 'none';
     document.getElementById('dashboard-view').style.display = '';
-    showCategory('status');
+    syncCategoryFromURL();
     refreshBackups();
     startPolling();
   }
 
-  function showCategory(category) {
+  function syncCategoryFromURL() {
+    if (document.getElementById('dashboard-view').style.display === 'none') return;
+    const requested = window.location.hash.slice(1);
+    let category = requested || 'status';
+    const invalid = !['status', 'world', 'backups'].includes(category);
+    const unavailable = category === 'backups' && document.getElementById('category-backups').hidden;
+    if (invalid || unavailable) {
+      category = 'status';
+      // Keep a direct #backups link until the initial availability check completes.
+      if (invalid || backupAvailabilityKnown) {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search + '#status');
+      }
+    }
+    showCategory(category, false);
+  }
+
+  function showCategory(category, updateURL = true) {
+    if (!['status', 'world', 'backups'].includes(category)) return;
     if (category === 'backups' && document.getElementById('category-backups').hidden) return;
+    if (updateURL && window.location.hash !== '#' + category) {
+      window.history.pushState(null, '', window.location.pathname + window.location.search + '#' + category);
+    }
     currentCategory = category;
     ['status', 'world', 'backups'].forEach(name => {
       document.getElementById('category-' + name).setAttribute('aria-pressed', String(name === category));
@@ -431,12 +455,12 @@
       const data = await response.json();
       const available = data.backups.length > 0;
       const button = document.getElementById('category-backups');
-      if (!available && currentCategory === 'backups') {
-        showCategory('status');
-        button.hidden = true;
+      const wasViewingBackups = currentCategory === 'backups';
+      backupAvailabilityKnown = true;
+      button.hidden = !available;
+      syncCategoryFromURL();
+      if (!available && wasViewingBackups) {
         document.getElementById('category-status').focus();
-      } else {
-        button.hidden = !available;
       }
       const list = document.getElementById('backup-list');
       list.replaceChildren();

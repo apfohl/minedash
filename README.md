@@ -206,6 +206,11 @@ support HTTP range requests for resuming transfers. This view does not restore,
 delete, or create backups.
 Set `BACKUP_PATH` if you use a different internal mount point.
 
+Categories can be linked directly with `/dashboard#status`, `/dashboard#world`,
+and `/dashboard#backups`. Refreshing preserves the selected category, and browser
+Back/Forward navigates between selections. Missing or invalid fragments select
+Status; a Backups link also falls back to Status when no backups are available.
+
 ## Building from source
 
 ```bash
