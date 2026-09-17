@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -42,6 +44,12 @@ func TestManualBackupLifecycleAndGuards(t *testing.T) {
 		case path == "/containers/backup-container/json":
 			w.Write([]byte(`{"Id":"backup-container","State":{"Running":true}}`))
 		case path == "/containers/backup-container/top":
+			// Docker rejects custom formats without PID. Require the default listing.
+			if args := r.URL.Query().Get("ps_args"); args != "" {
+				w.WriteHeader(500)
+				w.Write([]byte(`{"message":"Couldn't find PID field in ps output"}`))
+				return
+			}
 			if failTop {
 				w.WriteHeader(500)
 				w.Write([]byte(`{"message":"unavailable"}`))
@@ -51,7 +59,7 @@ func TestManualBackupLifecycleAndGuards(t *testing.T) {
 			if scheduled {
 				process = "/usr/bin/backup"
 			}
-			json.NewEncoder(w).Encode(map[string]any{"Titles": []string{"COMMAND"}, "Processes": [][]string{{process}}})
+			json.NewEncoder(w).Encode(map[string]any{"Titles": []string{"UID", "PID", "PPID", "C", "STIME", "TTY", "TIME", "CMD"}, "Processes": [][]string{{"root", "42", "1", "0", "10:00", "?", "00:00:00", process}}})
 		case path == "/containers/backup-container/exec":
 			var body struct{ Cmd []string }
 			json.NewDecoder(r.Body).Decode(&body)
@@ -110,8 +118,21 @@ func TestManualBackupLifecycleAndGuards(t *testing.T) {
 	}
 	scheduled = false
 	failTop = true
+	var errorLog bytes.Buffer
+	previousLogOutput := log.Writer()
+	log.SetOutput(&errorLog)
+	defer log.SetOutput(previousLogOutput)
 	if !backupBlocksControls() {
 		t.Fatal("unknown backup state allowed startup")
+	}
+	if output := errorLog.String(); !strings.Contains(output, "list backup processes") || !strings.Contains(output, "unavailable") || !strings.Contains(output, `service="backup"`) {
+		t.Fatalf("missing diagnostic context: %s", output)
+	}
+	if !backupBlocksControls() {
+		t.Fatal("unknown status no longer blocks controls")
+	}
+	if count := strings.Count(errorLog.String(), "backup status:"); count != 1 {
+		t.Fatalf("repeated polling logged %d errors", count)
 	}
 	failTop = false
 	w = httptest.NewRecorder()
