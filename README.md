@@ -202,8 +202,27 @@ filenames and are displayed without timezone conversion. MineDash reads only
 file metadata for the list. Each backup has a **Download** action that streams
 the original `.tar.gz` archive to your browser. Downloads require login and are
 available while the Minecraft server is running or stopped. Large downloads
-support HTTP range requests for resuming transfers. This view does not restore,
-delete, or create backups.
+support HTTP range requests for resuming transfers.
+
+Each backup also has a **Restore** action, available only while the server is
+confirmed stopped. Its native confirmation dialog warns that the entire mounted
+server volume will be replaced: world, settings, mods, server files, and logs.
+Archives must contain entries directly at the volume root. Restore uses the
+shared writable `/mc-data` mount, independently of `WORLD_PATH`. Only regular
+files and directories are supported; links, special files, unsafe paths, and
+entries under the reserved `.minedash-restore` directory are rejected.
+
+Restore stages the extracted backup alongside the current data, so sufficient
+free disk space is required for both. MineDash blocks Start, Restart, world
+upload, and additional restores throughout the operation. The server remains
+stopped afterward. A persistent journal and rollback data in
+`/mc-data/.minedash-restore` allow interrupted replacements to roll back on
+MineDash startup. If recovery cannot finish, startup remains blocked; retain
+that directory for recovery. Individual file moves are atomic, but the full
+volume replacement is not. Starting the container directly through Docker
+bypasses MineDash's guard. Run only one MineDash instance per server volume.
+
+MineDash does not delete or create backup archives.
 Set `BACKUP_PATH` if you use a different internal mount point.
 
 Categories can be linked directly with `/dashboard#status`, `/dashboard#world`,

@@ -336,9 +336,53 @@
   </section>
 </div>
 
+<dialog id="restore-dialog" style="margin:auto; max-width:480px; padding:24px; background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:12px;">
+  <h2>Restore this backup?</h2>
+  <p id="restore-backup-name" class="backup-name" style="white-space:pre-wrap"></p>
+  <p style="margin:20px 0">Your current world, settings, mods, and all other server files will be lost and replaced by this backup. The server will remain stopped.</p>
+  <button class="btn btn-ghost" autofocus onclick="document.getElementById('restore-dialog').close()">Cancel</button>
+  <button class="btn btn-danger" onclick="confirmRestore()">Restore backup</button>
+</dialog>
 <script>
   // ── state ──────────────────────────────────────────────
   let currentCategory = 'status';
+  let restoring = false;
+  let pendingRestore = false;
+  let selectedBackup = null;
+  function updateRestoreButtons() {
+    const reason = restoring || pendingRestore ? 'A backup restore is in progress or needs recovery.' : currentStatus !== 'stopped' ? 'Stop the server to restore a backup.' : '';
+    document.querySelectorAll('.restore-button').forEach(button => {
+      button.disabled = !!reason;
+      button.parentElement.title = reason;
+      button.title = reason;
+    });
+  }
+  function openRestore(backup) {
+    if (restoring || pendingRestore || currentStatus !== 'stopped') return;
+    selectedBackup = backup;
+    document.getElementById('restore-backup-name').textContent = backup.timestamp.replace('T', ' · ') + '\n' + backup.name;
+    document.getElementById('restore-dialog').showModal();
+  }
+  async function confirmRestore() {
+    const backup = selectedBackup;
+    document.getElementById('restore-dialog').close();
+    if (!backup || restoring) return;
+    restoring = true;
+    applyStatus(currentStatus);
+    const feedback = document.getElementById('backup-feedback');
+    setFeedback(feedback, '', 'Restoring backup…');
+    try {
+      const response = await fetch('/api/backups/' + encodeURIComponent(backup.name) + '/restore', {method: 'POST'});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Restore failed.');
+      setFeedback(feedback, 'ok', 'Backup restored. The server remains stopped.');
+    } catch (error) {
+      setFeedback(feedback, 'err', error.message);
+    } finally {
+      restoring = false;
+      await refreshStatus();
+    }
+  }
   let backupAvailabilityKnown = false;
   let backupsRefreshing = false;
   let lastBackupRefresh = 0;
@@ -496,12 +540,21 @@
         download.setAttribute('aria-label', 'Download ' + backup.name);
         download.textContent = 'Download';
         heading.append(download);
+        const restoreWrapper = document.createElement('span');
+        const restore = document.createElement('button');
+        restore.className = 'btn btn-danger btn-sm restore-button';
+        restore.textContent = 'Restore';
+        restore.setAttribute('aria-label', 'Restore ' + backup.name);
+        restore.onclick = () => openRestore(backup);
+        restoreWrapper.append(restore);
+        heading.append(restoreWrapper);
         item.append(heading, name);
         list.append(item);
       });
       document.getElementById('backup-summary').textContent = data.backups.length +
         (data.backups.length === 1 ? ' backup' : ' backups') + ' · ' + formatSize(total) + ' total';
-      setFeedback(feedback, '', '');
+      updateRestoreButtons();
+      if (!restoring) setFeedback(feedback, '', '');
     } catch {
       setFeedback(feedback, 'err', 'Could not refresh backups. The list may be out of date. Retrying automatically.');
     } finally {
@@ -553,6 +606,7 @@
       const r = await fetch('/api/status');
       if (r.status === 401) { showLogin(); return; }
       const d = await r.json();
+      pendingRestore = !!d.restorePending;
       applyStatus(d.status);
     } catch {
       applyStatus('unknown');
@@ -561,14 +615,15 @@
 
   function applyStatus(s) {
     currentStatus = s;
+    updateRestoreButtons();
     const badge = document.getElementById('status-badge');
     badge.className = 'badge badge-' + s;
     badge.textContent = s;
 
-    const canStart   = s === 'stopped';
+    const canStart   = s === 'stopped' && !restoring && !pendingRestore;
     const canStop    = s === 'running' || s === 'starting' || s === 'unhealthy';
-    const canRestart = s === 'running' || s === 'unhealthy';
-    const canWorld   = s === 'stopped';
+    const canRestart = (s === 'running' || s === 'unhealthy') && !restoring && !pendingRestore;
+    const canWorld   = s === 'stopped' && !restoring && !pendingRestore;
 
     document.getElementById('btn-start').disabled    = !canStart;
     document.getElementById('btn-stop').disabled     = !canStop;

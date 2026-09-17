@@ -135,6 +135,15 @@ func main() {
 	mux.HandleFunc("POST /login", loginHandler(cfg))
 	mux.HandleFunc("POST /logout", logoutHandler())
 
+	// Recover interrupted restores before accepting control requests.
+	if restorePending(volumePath) {
+		if err := dockerSvc.requireStopped(context.Background()); err != nil {
+			log.Printf("restore recovery blocked: %v", err)
+		} else if err := recoverRestore(volumePath); err != nil {
+			log.Printf("restore recovery failed: %v", err)
+		}
+	}
+
 	// Protected routes
 	mux.Handle("GET /dashboard", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !hasSession(cfg, r) {
@@ -144,13 +153,14 @@ func main() {
 		pageHandler(tmpl, "index.gohtml", cfg).ServeHTTP(w, r)
 	}))
 	mux.Handle("GET /api/status", jwtMiddleware(cfg, statusHandler(dockerSvc)))
+	mux.Handle("POST /api/backups/{name}/restore", jwtMiddleware(cfg, guardedVolumeAction(backupRestoreHandler(cfg, dockerSvc))))
 	mux.Handle("GET /api/backups", jwtMiddleware(cfg, backupsHandler(cfg)))
 	mux.Handle("GET /api/backups/{name}/download", jwtMiddleware(cfg, backupDownloadHandler(cfg)))
-	mux.Handle("POST /api/start", jwtMiddleware(cfg, startHandler(dockerSvc)))
+	mux.Handle("POST /api/start", jwtMiddleware(cfg, guardedVolumeAction(startHandler(dockerSvc))))
 	mux.Handle("POST /api/stop", jwtMiddleware(cfg, stopHandler(dockerSvc)))
-	mux.Handle("POST /api/restart", jwtMiddleware(cfg, restartHandler(dockerSvc)))
+	mux.Handle("POST /api/restart", jwtMiddleware(cfg, guardedVolumeAction(restartHandler(dockerSvc))))
 	mux.Handle("GET /api/world/download", jwtMiddleware(cfg, downloadHandler(dockerSvc, cfg)))
-	mux.Handle("POST /api/world/upload", jwtMiddleware(cfg, uploadHandler(dockerSvc, cfg)))
+	mux.Handle("POST /api/world/upload", jwtMiddleware(cfg, guardedVolumeAction(uploadHandler(dockerSvc, cfg))))
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
@@ -235,7 +245,7 @@ func statusHandler(d *dockerService) http.Handler {
 			errorJSON(w, http.StatusInternalServerError, fmt.Sprintf("failed to get status: %v", err))
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": state})
+		writeJSON(w, http.StatusOK, map[string]any{"status": state, "restorePending": restorePending(volumePath)})
 	})
 }
 
