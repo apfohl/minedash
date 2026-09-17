@@ -2,6 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"mime"
+	"strings"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -85,5 +90,120 @@ func TestBackupConfigOverrides(t *testing.T) {
 	cfg := loadConfig()
 	if cfg.BackupPath != "/custom-backups" || cfg.BackupPrefix != "grassblock" {
 		t.Fatalf("config: %+v", cfg)
+	}
+}
+
+func TestBackupDownload(t *testing.T) {
+	dir := t.TempDir()
+	name := "grassblock-2026-09-17T04-00-00.tar.gz"
+	content := "test archive contents"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(outside, []byte("secret"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	alias := "grassblock-2026-09-18T04-00-00.tar.gz"
+	if err := os.Symlink(outside, filepath.Join(dir, alias)); err != nil {
+		t.Fatal(err)
+	}
+	directory := "grassblock-2026-09-19T04-00-00.tar.gz"
+	if err := os.Mkdir(filepath.Join(dir, directory), 0700); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Config{BackupPath: dir, BackupPrefix: "grassblock", JWTSecret: "test-secret"}
+	mux := http.NewServeMux()
+	mux.Handle("GET /api/backups/{name}/download", jwtMiddleware(cfg, backupDownloadHandler(cfg)))
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour))})
+	signed, err := token.SignedString([]byte(cfg.JWTSecret))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, file, rangeHeader string
+		auth                    bool
+		status                  int
+		body                    string
+	}{
+		{name: "complete", file: name, auth: true, status: 200, body: content},
+		{name: "resumed", file: name, rangeHeader: "bytes=5-11", auth: true, status: 206, body: content[5:12]},
+		{name: "anonymous", file: name, status: 401},
+		{name: "missing", file: "grassblock-2026-09-20T04-00-00.tar.gz", auth: true, status: 404},
+		{name: "wrong prefix", file: "world-2026-09-17T04-00-00.tar.gz", auth: true, status: 404},
+		{name: "latest", file: "grassblock.latest.tar.gz", auth: true, status: 404},
+		{name: "invalid date", file: "grassblock-2026-02-30T04-00-00.tar.gz", auth: true, status: 404},
+		{name: "symlink", file: alias, auth: true, status: 404},
+		{name: "directory", file: directory, auth: true, status: 404},
+		{name: "traversal", file: "..%2F" + name, auth: true, status: 404},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "/api/backups/"+tc.file+"/download", nil)
+			if tc.auth {
+				r.AddCookie(&http.Cookie{Name: cookieName, Value: signed})
+			}
+			if tc.rangeHeader != "" {
+				r.Header.Set("Range", tc.rangeHeader)
+			}
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, r)
+			if w.Code != tc.status {
+				t.Fatalf("status = %d, body = %s", w.Code, w.Body)
+			}
+			if tc.body != "" {
+				if w.Body.String() != tc.body {
+					t.Fatalf("body = %q", w.Body.String())
+				}
+				if w.Header().Get("Content-Type") != "application/gzip" || w.Header().Get("Cache-Control") != "no-store" {
+					t.Fatalf("headers: %v", w.Header())
+				}
+				disposition, params, err := mime.ParseMediaType(w.Header().Get("Content-Disposition"))
+				if err != nil || disposition != "attachment" || params["filename"] != name {
+					t.Fatalf("disposition = %v %v %v", disposition, params, err)
+				}
+				if w.Header().Get("Accept-Ranges") != "bytes" {
+					t.Fatal("missing range support")
+				}
+			} else if strings.Contains(w.Body.String(), "secret") || strings.Contains(w.Body.String(), content) {
+				t.Fatal("unexpected file disclosure")
+			}
+		})
+	}
+}
+
+func TestBackupDownloadInvalidSessions(t *testing.T) {
+	cfg := Config{JWTSecret: "test-secret", BackupPath: t.TempDir(), BackupPrefix: "world"}
+	name := "world-2026-09-17T04-00-00.tar.gz"
+	if err := os.WriteFile(filepath.Join(cfg.BackupPath, name), []byte("private archive"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("GET /api/backups/{name}/download", jwtMiddleware(cfg, backupDownloadHandler(cfg)))
+	for _, tc := range []struct {
+		name, secret string
+		expiry       time.Time
+	}{
+		{name: "expired", secret: cfg.JWTSecret, expiry: time.Now().Add(-time.Hour)},
+		{name: "forged", secret: "wrong-secret", expiry: time.Now().Add(time.Hour)},
+		{name: "malformed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			value := "invalid-token"
+			if tc.secret != "" {
+				token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(tc.expiry)})
+				var err error
+				value, err = token.SignedString([]byte(tc.secret))
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			r := httptest.NewRequest(http.MethodGet, "/api/backups/"+name+"/download", nil)
+			r.AddCookie(&http.Cookie{Name: cookieName, Value: value})
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, r)
+			if w.Code != http.StatusUnauthorized || strings.Contains(w.Body.String(), "private archive") || w.Header().Get("Content-Disposition") != "" {
+				t.Fatalf("invalid session response: %d %v %s", w.Code, w.Header(), w.Body)
+			}
+		})
 	}
 }

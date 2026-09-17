@@ -145,6 +145,7 @@ func main() {
 	}))
 	mux.Handle("GET /api/status", jwtMiddleware(cfg, statusHandler(dockerSvc)))
 	mux.Handle("GET /api/backups", jwtMiddleware(cfg, backupsHandler(cfg)))
+	mux.Handle("GET /api/backups/{name}/download", jwtMiddleware(cfg, backupDownloadHandler(cfg)))
 	mux.Handle("POST /api/start", jwtMiddleware(cfg, startHandler(dockerSvc)))
 	mux.Handle("POST /api/stop", jwtMiddleware(cfg, stopHandler(dockerSvc)))
 	mux.Handle("POST /api/restart", jwtMiddleware(cfg, restartHandler(dockerSvc)))

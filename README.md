@@ -199,7 +199,11 @@ Only regular files named `<prefix>-YYYY-MM-DDTHH-MM-SS.tar.gz` are listed.
 The category stays hidden if the mount is missing or has no matching backups.
 The list refreshes automatically every 30 seconds. Dates and times come from
 filenames and are displayed without timezone conversion. MineDash reads only
-file metadata; this view does not download, restore, delete, or create backups.
+file metadata for the list. Each backup has a **Download** action that streams
+the original `.tar.gz` archive to your browser. Downloads require login and are
+available while the Minecraft server is running or stopped. Large downloads
+support HTTP range requests for resuming transfers. This view does not restore,
+delete, or create backups.
 Set `BACKUP_PATH` if you use a different internal mount point.
 
 ## Building from source

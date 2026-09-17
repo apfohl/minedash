@@ -465,6 +465,13 @@
         const name = document.createElement('p');
         name.className = 'backup-name';
         name.textContent = backup.name;
+        const download = document.createElement('a');
+        download.className = 'btn btn-ghost btn-sm';
+        download.href = '/api/backups/' + encodeURIComponent(backup.name) + '/download';
+        download.setAttribute('download', backup.name);
+        download.setAttribute('aria-label', 'Download ' + backup.name);
+        download.textContent = 'Download';
+        heading.append(download);
         item.append(heading, name);
         list.append(item);
       });
