@@ -249,7 +249,7 @@
 
 <!-- ════════════════ LOGIN VIEW ════════════════ -->
 <div id="login-view">
-  <span class="logo">Mine<span>Dash</span></span>
+  <a class="logo" href="/" style="text-decoration:none">Mine<span>Dash</span></a>
   <div class="card">
     <div class="field">
       <label for="password">Password</label>
@@ -263,7 +263,7 @@
 <!-- ════════════════ DASHBOARD VIEW ════════════════ -->
 <div id="dashboard-view" style="display:none; width:100%; max-width:600px;">
   <header>
-    <span class="logo">Mine<span>Dash</span></span>
+    <a class="logo" href="/" style="text-decoration:none">Mine<span>Dash</span></a>
     <button class="logout-btn" onclick="doLogout()">logout</button>
   </header>
 
@@ -311,19 +311,12 @@
 
   // ── init ───────────────────────────────────────────────
   window.addEventListener('DOMContentLoaded', () => {
-    // Try fetching status — if it succeeds we are already authenticated.
-    fetch('/api/status')
-      .then(r => {
-        if (r.ok) return r.json();
-        throw new Error('unauthenticated');
-      })
-      .then(data => {
-        showDashboard();
-        applyStatus(data.status);
-      })
-      .catch(() => {
-        showLogin();
-      });
+    {{if .Authenticated}}
+    showDashboard();
+    refreshStatus();
+    {{else}}
+    showLogin();
+    {{end}}
 
     // Drag-and-drop styling
     const area = document.getElementById('upload-area');
@@ -394,8 +387,7 @@
         return;
       }
       document.getElementById('password').value = '';
-      showDashboard();
-      refreshStatus();
+      window.location.href = "/dashboard";
     } catch {
       errEl.textContent = 'Network error. Please try again.';
     } finally {
@@ -407,7 +399,7 @@
   // ── logout ─────────────────────────────────────────────
   async function doLogout() {
     await fetch('/logout', { method: 'POST' }).catch(() => {});
-    showLogin();
+    window.location.href = "/";
   }
 
   // ── status ─────────────────────────────────────────────

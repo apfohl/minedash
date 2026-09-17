@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Server Status · MineDash</title>
+  <style>
+    :root {
+      --bg:          #0e1a0e;
+      --bg-card:     #162416;
+      --bg-input:    #1c2e1c;
+      --border:      #2a4a2a;
+      --border-bright: #3d6e3d;
+      --green-dim:   #4a7a3a;
+      --green:       #5fa83f;
+      --green-bright:#8bc34a;
+      --green-light: #b5e27a;
+      --text:        #d4edba;
+      --text-muted:  #7aaa5a;
+      --red:         #c0392b;
+      --red-dim:     #7a2520;
+      --orange:      #d4801a;
+      --radius:      6px;
+      --font:        'JetBrains Mono', monospace;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 14px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    /* ── header ── */
+    header {
+      width: 100%;
+      max-width: 600px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 32px;
+    }
+    .logo {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--green-bright);
+      letter-spacing: 0.05em;
+    }
+    .logo span { color: var(--green-light); }
+
+    /* ── card ── */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px 32px;
+      width: 100%;
+      max-width: 600px;
+    }
+    .card + .card { margin-top: 16px; }
+    .card-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--text-muted);
+      margin-bottom: 20px;
+    }
+
+    /* ── buttons ── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-family: var(--font);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 10px 20px;
+      border: 1px solid transparent;
+      border-radius: var(--radius);
+      cursor: pointer;
+      transition: opacity 0.15s, background 0.15s, border-color 0.15s;
+      text-decoration: none;
+    }
+    .btn-ghost {
+      background: transparent;
+      border-color: var(--border-bright);
+      color: var(--text);
+    }
+    .btn-ghost:hover:not(:disabled) { border-color: var(--green); color: var(--green-bright); }
+    .btn-sm { padding: 7px 14px; font-size: 12px; }
+
+    /* ── status badge ── */
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 6px 14px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+    }
+    .badge::before {
+      content: '';
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+      flex-shrink: 0;
+    }
+    .badge-running   { color: var(--green-bright); border-color: var(--green-dim); background: rgba(95,168,63,0.1);   }
+    .badge-stopped   { color: #a0a0a0;             border-color: #3a3a3a;         background: rgba(80,80,80,0.1);    }
+    .badge-starting  { color: var(--orange);        border-color: #7a4a10;         background: rgba(212,128,26,0.1);  }
+    .badge-stopping  { color: var(--orange);        border-color: #7a4a10;         background: rgba(212,128,26,0.1);  }
+    .badge-unhealthy { color: var(--red);           border-color: var(--red-dim);  background: rgba(192,57,43,0.1);   }
+    .badge-unknown   { color: #a0a0a0;              border-color: #3a3a3a;         background: rgba(80,80,80,0.1);    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+    .badge-starting::before,
+    .badge-stopping::before,
+    .badge-unhealthy::before { animation: pulse 1.2s ease-in-out infinite; }
+
+    /* ── hint text ── */
+    .hint { font-size: 12px; color: var(--text-muted); margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="logo">Mine<span>Dash</span></span>
+    {{if .Authenticated}}<a class="btn btn-ghost btn-sm" href="/dashboard">Dashboard</a>{{else}}<a class="btn btn-ghost btn-sm" href="/login">Login</a>{{end}}
+  </header>
+  <main class="card">
+    <h1 class="card-title">Server Status</h1>
+    <div class="status-row" role="status" aria-live="polite">
+      <span id="status-badge" class="badge badge-unknown">checking…</span>
+    </div>
+    <p class="hint" id="status-hint">Updates automatically every 3 seconds.</p>
+  </main>
+  <script>
+    async function refreshStatus() {
+      const badge = document.getElementById('status-badge');
+      const hint = document.getElementById('status-hint');
+      try {
+        const response = await fetch('/api/public/status', { cache: 'no-store' });
+        if (!response.ok) throw new Error('Status unavailable');
+        const data = await response.json();
+        const states = ['running', 'stopped', 'starting', 'stopping', 'unhealthy', 'unknown'];
+        const status = states.includes(data.status) ? data.status : 'unknown';
+        badge.className = 'badge badge-' + status;
+        badge.textContent = status;
+        hint.textContent = 'Updates automatically every 3 seconds.';
+      } catch {
+        badge.className = 'badge badge-unknown';
+        badge.textContent = 'unknown';
+        hint.textContent = 'Status unavailable. Retrying automatically…';
+      }
+    }
+    refreshStatus();
+    setInterval(refreshStatus, 3000);
+    window.addEventListener('pageshow', event => { if (event.persisted) window.location.reload(); });
+  </script>
+</body>
+</html>

@@ -76,23 +76,23 @@ func logoutHandler() http.HandlerFunc {
 // If the cookie is missing or invalid it returns 401.
 func jwtMiddleware(cfg Config, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cookie, err := r.Cookie(cookieName)
-		if err != nil {
-			errorJSON(w, http.StatusUnauthorized, "not authenticated")
-			return
-		}
-
-		token, err := jwt.ParseWithClaims(cookie.Value, &jwt.RegisteredClaims{}, func(t *jwt.Token) (any, error) {
-			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, jwt.ErrSignatureInvalid
-			}
-			return []byte(cfg.JWTSecret), nil
-		})
-		if err != nil || !token.Valid {
+		if !hasSession(cfg, r) {
 			errorJSON(w, http.StatusUnauthorized, "invalid or expired session")
 			return
 		}
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// hasSession checks the signature and expiry rather than just cookie presence.
+func hasSession(cfg Config, r *http.Request) bool {
+	cookie, err := r.Cookie(cookieName)
+	if err != nil {
+		return false
+	}
+	token, err := jwt.ParseWithClaims(cookie.Value, &jwt.RegisteredClaims{}, func(t *jwt.Token) (any, error) {
+		return []byte(cfg.JWTSecret), nil
+	}, jwt.WithValidMethods([]string{"HS256"}), jwt.WithExpirationRequired())
+	return err == nil && token.Valid
 }

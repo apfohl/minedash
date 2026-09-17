@@ -116,7 +116,7 @@ func main() {
 	}
 	defer dockerSvc.close()
 
-	tmpl, err := template.ParseFS(templates, "index.gohtml")
+	tmpl, err := template.ParseFS(templates, "*.gohtml")
 	if err != nil {
 		log.Fatalf("failed to parse templates: %v", err)
 	}
@@ -124,12 +124,21 @@ func main() {
 	mux := http.NewServeMux()
 
 	// Public routes
+	mux.Handle("GET /{$}", pageHandler(tmpl, "status.gohtml", cfg))
+	mux.Handle("GET /login", pageHandler(tmpl, "index.gohtml", cfg))
+	mux.Handle("GET /api/public/status", publicStatusHandler(dockerSvc))
 	mux.HandleFunc("GET /health", healthHandler())
 	mux.HandleFunc("POST /login", loginHandler(cfg))
 	mux.HandleFunc("POST /logout", logoutHandler())
 
 	// Protected routes
-	mux.Handle("GET /{$}", indexHandler(tmpl))
+	mux.Handle("GET /dashboard", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !hasSession(cfg, r) {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+		pageHandler(tmpl, "index.gohtml", cfg).ServeHTTP(w, r)
+	}))
 	mux.Handle("GET /api/status", jwtMiddleware(cfg, statusHandler(dockerSvc)))
 	mux.Handle("POST /api/start", jwtMiddleware(cfg, startHandler(dockerSvc)))
 	mux.Handle("POST /api/stop", jwtMiddleware(cfg, stopHandler(dockerSvc)))
@@ -175,13 +184,28 @@ func healthHandler() http.HandlerFunc {
 	}
 }
 
-// indexHandler serves the main UI page.
-func indexHandler(tmpl *template.Template) http.Handler {
+// pageHandler renders the page with the validated session state.
+func pageHandler(tmpl *template.Template, name string, cfg Config) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := tmpl.Execute(w, nil); err != nil {
+		w.Header().Set("Cache-Control", "no-store")
+		if err := tmpl.ExecuteTemplate(w, name, struct{ Authenticated bool }{hasSession(cfg, r)}); err != nil {
 			log.Printf("template error: %v", err)
 		}
+	})
+}
+
+// publicStatusHandler exposes only the state, keeping Docker errors private.
+func publicStatusHandler(d *dockerService) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		state, err := d.status(r.Context())
+		if err != nil {
+			log.Printf("public status: %v", err)
+			errorJSON(w, http.StatusServiceUnavailable, "status unavailable")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": state})
 	})
 }
 

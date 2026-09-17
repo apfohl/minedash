@@ -15,6 +15,7 @@ download and upload the world as a ZIP file.
   previous world is kept as `world.old` as a safety net
 - **Safe guards** — download and upload are only allowed while the server is
   stopped, preventing world corruption
+- **Public status page** — the landing page shows live server status without login, with a session-aware Login or Dashboard link. Server controls and world management are available at `/dashboard` after signing in at `/login`.
 - **Auth** — password-protected login backed by bcrypt + a signed JWT cookie;
   no database required
 - **Single binary** — Go backend with the UI embedded at compile time; the
