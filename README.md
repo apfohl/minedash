@@ -236,8 +236,12 @@ configuration, including the Minecraft stop-during-backup label.
 MineDash does not stop or restart Minecraft for backup creation. It displays
 backup progress and the process exit result on Backups, shows **backing up** in
 server status, and blocks server controls, world transfers, and restore while a
-backup is running. It also detects scheduled backup processes in the service and
-running processes after a MineDash restart. The last manual completion result is
+backup is running. The long-running `backup -foreground` scheduler is not itself
+an active backup. MineDash uses a read-only shell probe of the scheduler's lock
+file descriptor under `/proc` to detect scheduled backups running inside that
+process, and recognizes manual backup processes after a MineDash restart.
+This requires access to `/proc` and the image's standard
+`/var/lock/dockervolumebackup.lock` lock path. The last manual completion result is
 kept until MineDash restarts. If Docker cannot confirm backup process status,
 controls remain blocked until the check succeeds. The backup list refreshes when
 the process finishes. MineDash does not delete backup archives.

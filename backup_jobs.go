@@ -30,13 +30,96 @@ type backupJobs struct {
 
 var manualBackups *backupJobs
 
-func backupProcess(command string) bool {
-	for _, word := range strings.Fields(command) {
-		if filepath.Base(strings.Trim(word, "'\";")) == "backup" {
+func backupScheduler(command string) bool {
+	words := strings.Fields(command)
+	for _, word := range words {
+		option := strings.Trim(word, "'\";")
+		if option == "-foreground" || option == "--foreground" || option == "-foreground=true" || option == "--foreground=true" {
 			return true
 		}
 	}
 	return false
+}
+func backupProcess(command string) bool {
+	if backupScheduler(command) {
+		return false
+	}
+	words := strings.Fields(command)
+	if len(words) == 0 {
+		return false
+	}
+	// Match the executable, rather than arbitrary arguments containing 'backup'.
+	executable := filepath.Base(strings.Trim(words[0], "'\";"))
+	if executable == "backup" {
+		for _, word := range words[1:] {
+			if strings.Trim(word, "'\";") == "print-config" {
+				return false
+			}
+		}
+		return true
+	}
+	if executable == "sh" || executable == "bash" {
+		if len(words) > 1 && filepath.Base(strings.Trim(words[1], "'\";")) == "backup" {
+			return true
+		}
+		if len(words) > 2 && words[1] == "-c" && filepath.Base(strings.Trim(words[2], "'\";")) == "backup" {
+			return true
+		}
+	}
+	return false
+}
+
+// The foreground scheduler runs scheduled backups in-process. Read the lock
+// recorded on its file descriptor; checking the lock file's existence is insufficient.
+const backupLockProbe = `
+proc_root=$1
+[ -d "$proc_root/1/fd" ] && [ -r "$proc_root/1/fd" ] || exit 20
+for fd in "$proc_root"/[0-9]*/fd/*; do
+ [ "$(readlink "$fd" 2>/dev/null)" = /var/lock/dockervolumebackup.lock ] || continue
+ info="${fd%/fd/*}/fdinfo/${fd##*/}"
+ [ -r "$info" ] || exit 20
+ grep -q '^lock:' "$info"
+ result=$?
+ [ "$result" = 0 ] && exit 10
+ [ "$result" = 1 ] || exit 20
+done
+exit 0
+`
+
+func (b *backupJobs) scheduledBackupRunning(ctx context.Context, id string) (bool, error) {
+	job, err := b.docker.client.ContainerExecCreate(ctx, id, container.ExecOptions{Cmd: []string{"sh", "-c", backupLockProbe, "minedash-backup-status", "/proc"}})
+	if err != nil {
+		return false, err
+	}
+	if err = b.docker.client.ContainerExecStart(ctx, job.ID, container.ExecStartOptions{Detach: true}); err != nil {
+		return false, err
+	}
+	var exitCode int
+	for {
+		result, err := b.docker.client.ContainerExecInspect(ctx, job.ID)
+		if err != nil {
+			return false, err
+		}
+		if !result.Running {
+			exitCode = result.ExitCode
+			break
+		}
+		timer := time.NewTimer(25 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return false, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	switch exitCode {
+	case 0:
+		return false, nil
+	case 10:
+		return true, nil
+	default:
+		return false, fmt.Errorf("backup lock probe failed with exit code %d", exitCode)
+	}
 }
 func (b *backupJobs) snapshot(ctx context.Context) backupJobStatus {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -122,12 +205,25 @@ func (b *backupJobs) snapshotLocked(ctx context.Context) backupJobStatus {
 	if e != nil {
 		return unknown("list backup processes", e)
 	}
-	b.statusError = ""
+	scheduler := false
 	for _, process := range top.Processes {
+		if len(process) > 0 && backupScheduler(process[len(process)-1]) {
+			scheduler = true
+		}
 		if len(process) > 0 && backupProcess(process[len(process)-1]) {
 			return backupJobStatus{Available: true, State: "running", Message: "Backup in progress. The backup service manages stopping and restarting the server."}
 		}
 	}
+	if scheduler {
+		running, err := b.scheduledBackupRunning(ctx, id)
+		if err != nil {
+			return unknown("inspect scheduled backup lock", err)
+		}
+		if running {
+			return backupJobStatus{Available: true, State: "running", Message: "Scheduled backup in progress. The backup service manages stopping and restarting the server."}
+		}
+	}
+	b.statusError = ""
 	if b.last.State != "" {
 		return b.last
 	}
