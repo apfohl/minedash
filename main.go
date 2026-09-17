@@ -34,6 +34,8 @@ type Config struct {
 	JWTSecret        string
 	Port             string
 	WorldPath        string // optional override; empty means auto-detect
+	BackupPath       string // directory mounted into MineDash (default /backups)
+	BackupPrefix     string // dated archive filename prefix (default world)
 	MCUID            int    // uid to chown the world to after upload (default 1000)
 	MCGID            int    // gid to chown the world to after upload (default 1000)
 }
@@ -49,6 +51,8 @@ func loadConfig() Config {
 		JWTSecret:        getEnv("JWT_SECRET", ""),
 		Port:             getEnv("PORT", "8080"),
 		WorldPath:        getEnv("WORLD_PATH", ""),
+		BackupPath:       getEnv("BACKUP_PATH", "/backups"),
+		BackupPrefix:     getEnv("BACKUP_PREFIX", "world"),
 		MCUID:            getEnvInt("MC_UID", 1000),
 		MCGID:            getEnvInt("MC_GID", 1000),
 	}
@@ -140,6 +144,7 @@ func main() {
 		pageHandler(tmpl, "index.gohtml", cfg).ServeHTTP(w, r)
 	}))
 	mux.Handle("GET /api/status", jwtMiddleware(cfg, statusHandler(dockerSvc)))
+	mux.Handle("GET /api/backups", jwtMiddleware(cfg, backupsHandler(cfg)))
 	mux.Handle("POST /api/start", jwtMiddleware(cfg, startHandler(dockerSvc)))
 	mux.Handle("POST /api/stop", jwtMiddleware(cfg, stopHandler(dockerSvc)))
 	mux.Handle("POST /api/restart", jwtMiddleware(cfg, restartHandler(dockerSvc)))

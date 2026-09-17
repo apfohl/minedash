@@ -21,6 +21,8 @@ download and upload the world as a ZIP file.
 - **Single binary** — Go backend with the UI embedded at compile time; the
   Docker image is ~14 MB
 
+- **Backup list** — browse dated archives newest first, with timestamps, sizes, and total storage. The Backups category appears only when matching files exist.
+
 ## Screenshots
 
 ![Dashboard](dashboard.png)
@@ -105,6 +107,8 @@ environment always take precedence.
 | `MC_UID` | no | `1000` | UID to assign to the world folder after upload; must match `PUID` in the itzg container |
 | `MC_GID` | no | `1000` | GID to assign to the world folder after upload; must match `PGID` in the itzg container |
 | `PORT` | no | `8080` | Internal HTTP listen port |
+| `BACKUP_PATH` | no | `/backups` | Directory containing mounted backup archives |
+| `BACKUP_PREFIX` | no | `world` | Filename prefix for dated `.tar.gz` backups |
 | `WORLD_PATH` | no | auto-detect | Explicit path to the world folder; skips scanning `/mc-data` for `level.dat` |
 
 \* Required unless `MC_CONTAINER_NAME` is set.
@@ -175,6 +179,28 @@ If you need to roll back, stop the server and swap `world.old` back manually:
 docker run --rm -v mc-data:/mc-data alpine sh -c \
   "rm -rf /mc-data/world && mv /mc-data/world.old /mc-data/world"
 ```
+
+## Backups
+
+The dashboard has **Status**, **World Management**, and an optional **Backups**
+category. To enable the backup list, mount your backup directory into MineDash
+read-only and configure the filename prefix. For example, add these entries to
+the `minedash` service in your Compose file (alongside its existing entries):
+
+```yaml
+volumes:
+  - /home/andreas/grassblock/backups:/backups:ro
+environment:
+  - BACKUP_PREFIX=grassblock
+```
+
+Only regular files named `<prefix>-YYYY-MM-DDTHH-MM-SS.tar.gz` are listed.
+`grassblock.latest.tar.gz`, symlinks, directories, and unrelated files are ignored.
+The category stays hidden if the mount is missing or has no matching backups.
+The list refreshes automatically every 30 seconds. Dates and times come from
+filenames and are displayed without timezone conversion. MineDash reads only
+file metadata; this view does not download, restore, delete, or create backups.
+Set `BACKUP_PATH` if you use a different internal mount point.
 
 ## Building from source
 

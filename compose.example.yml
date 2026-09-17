@@ -20,6 +20,8 @@ services:
     restart: unless-stopped
     volumes:
       - mc-data:/mc-data
+      # Optional: mount your backup directory read-only and set BACKUP_PREFIX below.
+      # - ./backups:/backups:ro
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - MC_STACK_NAME=${COMPOSE_PROJECT_NAME}  # auto-filled by Compose at deploy time
@@ -27,6 +29,8 @@ services:
       - AUTH_PASSWORD_HASH=        # bcrypt hash: ./minedash genpw — escape each $ as $$
       - JWT_SECRET=                # openssl rand -hex 32
       - PORT=8080
+      - BACKUP_PATH=/backups
+      - BACKUP_PREFIX=world        # e.g. grassblock for grassblock-<timestamp>.tar.gz
       - MC_UID=1000                # must match PUID of the minecraft container
       - MC_GID=1000                # must match PGID of the minecraft container
     networks:

@@ -78,6 +78,25 @@
       margin-bottom: 20px;
     }
 
+    [hidden] { display: none !important; }
+    .categories { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+    .category { flex: 1; padding: 10px 12px; }
+    .category[aria-pressed=true] { background: var(--bg-input); border-color: var(--green); color: var(--green-light); }
+    .category:focus-visible { outline: 2px solid var(--green-bright); outline-offset: 3px; }
+    .backup-summary { color: var(--text-muted); font-size: 12px; margin-bottom: 20px; }
+    .backup-list { list-style: none; }
+    .backup-item { padding: 16px 0; border-top: 1px solid var(--border); }
+    .backup-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .backup-date { font-weight: 600; color: var(--green-light); }
+    .backup-size { font-size: 12px; color: var(--text-muted); }
+    .backup-name { font-size: 12px; color: var(--text-muted); margin-top: 8px; overflow-wrap: anywhere; }
+    .backup-newest { font-size: 10px; color: var(--green-bright); border: 1px solid var(--green-dim); border-radius: 999px; padding: 3px 8px; }
+    @media (max-width: 480px) {
+      body { padding: 16px; }
+      .card { padding: 24px 20px; }
+      .category { font-size: 11px; }
+    }
+
     /* ── login form ── */
     #login-view { text-align: center; }
     #login-view .logo { font-size: 26px; margin-bottom: 28px; display: block; }
@@ -267,8 +286,14 @@
     <button class="logout-btn" onclick="doLogout()">logout</button>
   </header>
 
+  <nav class="categories" aria-label="Dashboard categories">
+    <button class="btn btn-ghost category" id="category-status" aria-pressed="true" aria-controls="panel-status" onclick="showCategory('status')">Status</button>
+    <button class="btn btn-ghost category" id="category-world" aria-pressed="false" aria-controls="panel-world" onclick="showCategory('world')">World Management</button>
+    <button class="btn btn-ghost category" id="category-backups" aria-pressed="false" aria-controls="panel-backups" onclick="showCategory('backups')" hidden>Backups</button>
+  </nav>
+
   <!-- Status card -->
-  <div class="card">
+  <section class="card" id="panel-status" aria-labelledby="category-status">
     <div class="card-title">Server Status</div>
     <div class="status-row">
       <span id="status-badge" class="badge badge-unknown">unknown</span>
@@ -279,10 +304,10 @@
       <button class="btn btn-danger" id="btn-stop"   onclick="doAction('stop')">Stop</button>
     </div>
     <div id="action-feedback" class="feedback"></div>
-  </div>
+  </section>
 
   <!-- World card -->
-  <div class="card">
+  <section class="card" id="panel-world" aria-labelledby="category-world" hidden>
     <div class="card-title">World Management</div>
     <div class="world-row">
       <button class="btn btn-ghost" id="btn-download" onclick="doDownload()">Download World</button>
@@ -300,11 +325,22 @@
       <button class="btn btn-primary upload-submit" id="btn-upload" onclick="doUpload()" disabled>Upload &amp; Replace World</button>
       <div id="upload-feedback" class="feedback"></div>
     </div>
-  </div>
+  </section>
+
+  <section class="card" id="panel-backups" aria-labelledby="category-backups" hidden>
+    <div class="card-title">Available Backups</div>
+    <p class="backup-summary" id="backup-summary"></p>
+    <div id="backup-feedback" class="feedback" role="status"></div>
+    <ul class="backup-list" id="backup-list"></ul>
+    <p class="hint">Dates and times are shown as recorded in the backup filenames.</p>
+  </section>
 </div>
 
 <script>
   // ── state ──────────────────────────────────────────────
+  let currentCategory = 'status';
+  let backupsRefreshing = false;
+  let lastBackupRefresh = 0;
   let currentStatus = 'unknown';
   let polling       = false;   // true while an action/upload is in flight
   let pollInterval  = null;
@@ -344,6 +380,7 @@
     pollInterval = setInterval(() => {
       if (polling) return;
       refreshStatus();
+      if (Date.now() - lastBackupRefresh >= 30000) refreshBackups();
     }, 3000);
   }
 
@@ -361,7 +398,84 @@
   function showDashboard() {
     document.getElementById('login-view').style.display = 'none';
     document.getElementById('dashboard-view').style.display = '';
+    showCategory('status');
+    refreshBackups();
     startPolling();
+  }
+
+  function showCategory(category) {
+    if (category === 'backups' && document.getElementById('category-backups').hidden) return;
+    currentCategory = category;
+    ['status', 'world', 'backups'].forEach(name => {
+      document.getElementById('category-' + name).setAttribute('aria-pressed', String(name === category));
+      document.getElementById('panel-' + name).hidden = name !== category;
+    });
+  }
+
+  function formatSize(bytes) {
+    const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+    let unit = 0;
+    while (bytes >= 1024 && unit < units.length - 1) { bytes /= 1024; unit++; }
+    return bytes.toLocaleString(undefined, { maximumFractionDigits: unit ? 2 : 0 }) + ' ' + units[unit];
+  }
+
+  async function refreshBackups() {
+    if (backupsRefreshing) return;
+    backupsRefreshing = true;
+    lastBackupRefresh = Date.now();
+    const feedback = document.getElementById('backup-feedback');
+    try {
+      const response = await fetch('/api/backups');
+      if (response.status === 401) { showLogin(); return; }
+      if (!response.ok) throw new Error('Unavailable');
+      const data = await response.json();
+      const available = data.backups.length > 0;
+      const button = document.getElementById('category-backups');
+      if (!available && currentCategory === 'backups') {
+        showCategory('status');
+        button.hidden = true;
+        document.getElementById('category-status').focus();
+      } else {
+        button.hidden = !available;
+      }
+      const list = document.getElementById('backup-list');
+      list.replaceChildren();
+      let total = 0;
+      data.backups.forEach((backup, index) => {
+        total += backup.size;
+        const item = document.createElement('li');
+        item.className = 'backup-item';
+        const heading = document.createElement('div');
+        heading.className = 'backup-heading';
+        const date = document.createElement('span');
+        date.className = 'backup-date';
+        const [day, time] = backup.timestamp.split('T');
+        date.textContent = day + ' · ' + time.replaceAll('-', ':');
+        heading.append(date);
+        if (index === 0) {
+          const newest = document.createElement('span');
+          newest.className = 'backup-newest';
+          newest.textContent = 'Newest';
+          heading.append(newest);
+        }
+        const size = document.createElement('span');
+        size.className = 'backup-size';
+        size.textContent = formatSize(backup.size);
+        heading.append(size);
+        const name = document.createElement('p');
+        name.className = 'backup-name';
+        name.textContent = backup.name;
+        item.append(heading, name);
+        list.append(item);
+      });
+      document.getElementById('backup-summary').textContent = data.backups.length +
+        (data.backups.length === 1 ? ' backup' : ' backups') + ' · ' + formatSize(total) + ' total';
+      setFeedback(feedback, '', '');
+    } catch {
+      setFeedback(feedback, 'err', 'Could not refresh backups. The list may be out of date. Retrying automatically.');
+    } finally {
+      backupsRefreshing = false;
+    }
   }
 
   // ── login ──────────────────────────────────────────────
