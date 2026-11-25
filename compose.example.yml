@@ -28,6 +28,11 @@ services:
       - MC_SERVICE_NAME=minecraft              # Compose service name of the MC container
       - AUTH_PASSWORD_HASH=        # bcrypt hash: ./minedash genpw — escape each $ as $$
       - JWT_SECRET=                # openssl rand -hex 32
+      - OIDC_ISSUER=${OIDC_ISSUER:-https://auth.pfohl.dev}
+      - OIDC_CLIENT_ID=${OIDC_CLIENT_ID:-}
+      - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET:-}
+      - OIDC_CALLBACK_URL=${OIDC_CALLBACK_URL:-}
+      - OIDC_LOGOUT_REDIRECT_URL=${OIDC_LOGOUT_REDIRECT_URL:-}
       - PORT=8080
       - BACKUP_SERVICE_NAME=backup # offen/docker-volume-backup service in this stack
       - BACKUP_PATH=/backups

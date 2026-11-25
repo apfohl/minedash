@@ -16,8 +16,8 @@ download and upload the world as a ZIP file.
 - **Safe guards** — download and upload are only allowed while the server is
   stopped, preventing world corruption
 - **Public status page** — the landing page shows live server status without login, with a session-aware Login or Dashboard link. Server controls and world management are available at `/dashboard` after signing in at `/login`.
-- **Auth** — password-protected login backed by bcrypt + a signed JWT cookie;
-  no database required
+- **Auth** — local bcrypt password login and optional OpenID Connect with signed
+  session cookies
 - **Single binary** — Go backend with the UI embedded at compile time; the
   Docker image is ~14 MB
 
@@ -113,6 +113,41 @@ environment always take precedence.
 | `WORLD_PATH` | no | auto-detect | Explicit path to the world folder; skips scanning `/mc-data` for `level.dat` |
 
 \* Required unless `MC_CONTAINER_NAME` is set.
+
+### Optional OpenID Connect login
+
+The local password remains available. Every user who signs in through the
+configured provider receives the same dashboard permissions as a password
+login, including server controls and world management. MineDash uses the
+verified issuer and subject as the OIDC identity.
+
+Use the dashboard's public HTTPS hostname and the path `/oidc/callback`.
+Register a confidential client in the provider's Compose directory using the
+exact public URL:
+
+```sh
+docker compose exec auth oidc client add 'https://mc.example.com/oidc/callback' 'MineDash'
+```
+
+| Variable | Value |
+|---|---|
+| `OIDC_ISSUER` | Defaults to `https://auth.pfohl.dev` |
+| `OIDC_CLIENT_ID` | Client ID from registration |
+| `OIDC_CLIENT_SECRET` | Client secret from registration. Keep it in protected deployment configuration. |
+| `OIDC_CALLBACK_URL` | Exact registered public HTTPS callback URL |
+| `OIDC_LOGOUT_REDIRECT_URL` | Optional exact HTTPS return URL registered as the third argument to `oidc client add`, for example `https://mc.example.com/` |
+
+MineDash discovers the provider endpoints and uses Authorization Code with PKCE
+`S256`, `client_secret_basic`, and RS256 verification. With the `profile`
+scope, MineDash shows the provider account link when UserInfo supplies an
+HTTPS profile URL on the issuer host.
+
+The dashboard's **logout** button clears the MineDash session. **logout from
+provider** also opens the provider's confirmation page. If a return URL is
+configured, MineDash sends it with the client ID.
+
+Pending OIDC logins are kept in memory. In a multi-instance deployment, route
+login initiation and callback to the same instance.
 
 ### Container resolution
 

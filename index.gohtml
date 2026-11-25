@@ -278,6 +278,9 @@
     </div>
     <button class="btn btn-primary" id="login-btn" onclick="doLogin()">Login</button>
     <div id="login-error"></div>
+    {{if .OIDCEnabled}}
+    <a class="btn btn-ghost" href="/oidc/login">Sign in with OpenID Connect</a>
+    {{end}}
   </div>
 </div>
 
@@ -285,7 +288,15 @@
 <div id="dashboard-view" style="display:none; width:100%; max-width:600px;">
   <header>
     <a class="logo" href="/" style="text-decoration:none">Mine<span>Dash</span></a>
-    <button class="logout-btn" onclick="doLogout()">logout</button>
+    <div>
+      {{if .ProfileURL}}<a class="logout-btn" href="{{.ProfileURL}}" rel="noreferrer">Provider account</a>{{end}}
+      <button class="logout-btn" onclick="doLogout()">logout</button>
+      {{if .ProviderLogout}}
+      <form method="post" action="/oidc/logout" style="display:inline">
+        <button class="logout-btn" type="submit">logout from provider</button>
+      </form>
+      {{end}}
+    </div>
   </header>
 
   <nav class="categories" aria-label="Dashboard categories">

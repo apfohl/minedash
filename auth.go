@@ -33,25 +33,10 @@ func loginHandler(cfg Config) http.HandlerFunc {
 			return
 		}
 
-		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(jwtTTL)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-		})
-
-		signed, err := token.SignedString([]byte(cfg.JWTSecret))
-		if err != nil {
+		if err := setSession(w, cfg, sessionClaims{}, false); err != nil {
 			errorJSON(w, http.StatusInternalServerError, "failed to create session")
 			return
 		}
-
-		http.SetCookie(w, &http.Cookie{
-			Name:     cookieName,
-			Value:    signed,
-			Path:     "/",
-			MaxAge:   int(jwtTTL.Seconds()),
-			HttpOnly: true,
-			SameSite: http.SameSiteStrictMode,
-		})
 
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	}
@@ -60,14 +45,7 @@ func loginHandler(cfg Config) http.HandlerFunc {
 // logoutHandler clears the session cookie.
 func logoutHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		http.SetCookie(w, &http.Cookie{
-			Name:     cookieName,
-			Value:    "",
-			Path:     "/",
-			MaxAge:   -1,
-			HttpOnly: true,
-			SameSite: http.SameSiteStrictMode,
-		})
+		clearSession(w)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "logged out"})
 	}
 }
@@ -85,14 +63,56 @@ func jwtMiddleware(cfg Config, next http.Handler) http.Handler {
 	})
 }
 
+type sessionClaims struct {
+	jwt.RegisteredClaims
+	ProfileURL     string `json:"profile,omitempty"`
+	ProviderLogout bool   `json:"provider_logout,omitempty"`
+}
+
+func setSession(w http.ResponseWriter, cfg Config, claims sessionClaims, secure bool) error {
+	now := time.Now()
+	claims.ExpiresAt = jwt.NewNumericDate(now.Add(jwtTTL))
+	claims.IssuedAt = jwt.NewNumericDate(now)
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := token.SignedString([]byte(cfg.JWTSecret))
+	if err != nil {
+		return err
+	}
+	sameSite := http.SameSiteStrictMode
+	if secure {
+		// The OIDC callback is reached through a cross-site navigation.
+		sameSite = http.SameSiteLaxMode
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name: cookieName, Value: signed, Path: "/", MaxAge: int(jwtTTL.Seconds()),
+		HttpOnly: true, Secure: secure, SameSite: sameSite,
+	})
+	return nil
+}
+
+func clearSession(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name: cookieName, Path: "/", MaxAge: -1,
+		HttpOnly: true, SameSite: http.SameSiteStrictMode,
+	})
+}
+
 // hasSession checks the signature and expiry rather than just cookie presence.
 func hasSession(cfg Config, r *http.Request) bool {
+	return readSession(cfg, r) != nil
+}
+
+func readSession(cfg Config, r *http.Request) *sessionClaims {
 	cookie, err := r.Cookie(cookieName)
 	if err != nil {
-		return false
+		return nil
 	}
-	token, err := jwt.ParseWithClaims(cookie.Value, &jwt.RegisteredClaims{}, func(t *jwt.Token) (any, error) {
+	claims := &sessionClaims{}
+	token, err := jwt.ParseWithClaims(cookie.Value, claims, func(t *jwt.Token) (any, error) {
 		return []byte(cfg.JWTSecret), nil
 	}, jwt.WithValidMethods([]string{"HS256"}), jwt.WithExpirationRequired())
-	return err == nil && token.Valid
+	if err != nil || !token.Valid {
+		return nil
+	}
+	return claims
 }

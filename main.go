@@ -32,6 +32,7 @@ type Config struct {
 
 	AuthPasswordHash  string
 	JWTSecret         string
+	OIDC              oidcConfig
 	Port              string
 	WorldPath         string // optional override; empty means auto-detect
 	BackupPath        string // directory mounted into MineDash (default /backups)
@@ -45,11 +46,18 @@ func loadConfig() Config {
 	_ = godotenv.Load()
 
 	return Config{
-		MCContainerName:   getEnv("MC_CONTAINER_NAME", ""),
-		MCStackName:       getEnv("MC_STACK_NAME", ""),
-		MCServiceName:     getEnv("MC_SERVICE_NAME", "minecraft"),
-		AuthPasswordHash:  getEnv("AUTH_PASSWORD_HASH", ""),
-		JWTSecret:         getEnv("JWT_SECRET", ""),
+		MCContainerName:  getEnv("MC_CONTAINER_NAME", ""),
+		MCStackName:      getEnv("MC_STACK_NAME", ""),
+		MCServiceName:    getEnv("MC_SERVICE_NAME", "minecraft"),
+		AuthPasswordHash: getEnv("AUTH_PASSWORD_HASH", ""),
+		JWTSecret:        getEnv("JWT_SECRET", ""),
+		OIDC: oidcConfig{
+			Issuer:            getEnv("OIDC_ISSUER", "https://auth.pfohl.dev"),
+			ClientID:          getEnv("OIDC_CLIENT_ID", ""),
+			ClientSecret:      getEnv("OIDC_CLIENT_SECRET", ""),
+			CallbackURL:       getEnv("OIDC_CALLBACK_URL", ""),
+			LogoutRedirectURL: getEnv("OIDC_LOGOUT_REDIRECT_URL", ""),
+		},
 		Port:              getEnv("PORT", "8080"),
 		WorldPath:         getEnv("WORLD_PATH", ""),
 		BackupPath:        getEnv("BACKUP_PATH", "/backups"),
@@ -116,6 +124,10 @@ func main() {
 		log.Fatal("JWT_SECRET is required")
 	}
 
+	if err := cfg.OIDC.validate(); err != nil {
+		log.Fatal(err)
+	}
+
 	dockerSvc, err := newDockerService(cfg)
 	if err != nil {
 		log.Fatalf("failed to connect to Docker: %v", err)
@@ -137,6 +149,12 @@ func main() {
 	mux.HandleFunc("GET /health", healthHandler())
 	mux.HandleFunc("POST /login", loginHandler(cfg))
 	mux.HandleFunc("POST /logout", logoutHandler())
+	if cfg.OIDC.enabled() {
+		login := &oidcLogin{cfg: cfg, flows: make(map[string]oidcFlow)}
+		mux.HandleFunc("GET /oidc/login", login.start)
+		mux.HandleFunc("GET "+oidcCallbackPath, login.callback)
+		mux.Handle("POST /oidc/logout", http.NewCrossOriginProtection().Handler(http.HandlerFunc(login.logout)))
+	}
 
 	// Recover interrupted restores before accepting control requests.
 	if restorePending(volumePath) {
@@ -212,7 +230,16 @@ func pageHandler(tmpl *template.Template, name string, cfg Config) http.Handler 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
-		if err := tmpl.ExecuteTemplate(w, name, struct{ Authenticated bool }{hasSession(cfg, r)}); err != nil {
+		claims := readSession(cfg, r)
+		data := struct {
+			Authenticated, OIDCEnabled, ProviderLogout bool
+			ProfileURL                                 string
+		}{Authenticated: claims != nil, OIDCEnabled: cfg.OIDC.enabled()}
+		if data.OIDCEnabled && claims != nil && claims.Issuer == cfg.OIDC.Issuer {
+			data.ProfileURL = claims.ProfileURL
+			data.ProviderLogout = claims.ProviderLogout
+		}
+		if err := tmpl.ExecuteTemplate(w, name, data); err != nil {
 			log.Printf("template error: %v", err)
 		}
 	})
