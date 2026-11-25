@@ -288,15 +288,7 @@
 <div id="dashboard-view" style="display:none; width:100%; max-width:600px;">
   <header>
     <a class="logo" href="/" style="text-decoration:none">Mine<span>Dash</span></a>
-    <div>
-      {{if .ProfileURL}}<a class="logout-btn" href="{{.ProfileURL}}" rel="noreferrer">Provider account</a>{{end}}
-      <button class="logout-btn" onclick="doLogout()">logout</button>
-      {{if .ProviderLogout}}
-      <form method="post" action="/oidc/logout" style="display:inline">
-        <button class="logout-btn" type="submit">logout from provider</button>
-      </form>
-      {{end}}
-    </div>
+    <button class="logout-btn" onclick="doLogout()">logout</button>
   </header>
 
   <nav class="categories" aria-label="Dashboard categories">

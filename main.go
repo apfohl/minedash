@@ -232,13 +232,8 @@ func pageHandler(tmpl *template.Template, name string, cfg Config) http.Handler 
 		w.Header().Set("Cache-Control", "no-store")
 		claims := readSession(cfg, r)
 		data := struct {
-			Authenticated, OIDCEnabled, ProviderLogout bool
-			ProfileURL                                 string
+			Authenticated, OIDCEnabled bool
 		}{Authenticated: claims != nil, OIDCEnabled: cfg.OIDC.enabled()}
-		if data.OIDCEnabled && claims != nil && claims.Issuer == cfg.OIDC.Issuer {
-			data.ProfileURL = claims.ProfileURL
-			data.ProviderLogout = claims.ProviderLogout
-		}
 		if err := tmpl.ExecuteTemplate(w, name, data); err != nil {
 			log.Printf("template error: %v", err)
 		}

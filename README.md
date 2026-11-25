@@ -138,13 +138,10 @@ docker compose exec auth oidc client add 'https://mc.example.com/oidc/callback' 
 | `OIDC_LOGOUT_REDIRECT_URL` | Optional exact HTTPS return URL registered as the third argument to `oidc client add`, for example `https://mc.example.com/` |
 
 MineDash discovers the provider endpoints and uses Authorization Code with PKCE
-`S256`, `client_secret_basic`, and RS256 verification. With the `profile`
-scope, MineDash shows the provider account link when UserInfo supplies an
-HTTPS profile URL on the issuer host.
+`S256`, `client_secret_basic`, and RS256 verification. It checks that the
+UserInfo subject matches the ID token.
 
-The dashboard's **logout** button clears the MineDash session. **logout from
-provider** also opens the provider's confirmation page. If a return URL is
-configured, MineDash sends it with the client ID.
+The dashboard's **logout** button clears the MineDash session.
 
 Pending OIDC logins are kept in memory. In a multi-instance deployment, route
 login initiation and callback to the same instance.
